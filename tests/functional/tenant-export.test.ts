@@ -81,3 +81,34 @@ it('does not expose customer content through JSON parser diagnostics', async () 
   }, error: null }))
   await expect(buildTenantExport('tenant',vi.fn())).rejects.toThrow('Un registro de la exportación no es válido.')
 })
+
+it('records unavailable schema elements in the archive and exports the current schema', async () => {
+  const changes = [{ collection: 'retired_table', reason: 'table_unavailable' }, { collection: 'tickets', reason: 'columns_unavailable', columns: ['retired_field'] }]
+  const request = api.rpc.getMockImplementation()
+  if (!request) throw new Error('Missing RPC mock')
+  api.rpc.mockImplementation(async (name, args) => args.p_collection ? request(name, args) : { data: { ...manifest, schemaChanges: changes }, error: null })
+  const files = unzipSync(new Uint8Array(await (await buildTenantExport('tenant', vi.fn())).arrayBuffer()))
+  expect(JSON.parse(strFromU8(files['manifest.json'])).schemaChanges).toEqual(changes)
+  expect(JSON.parse(strFromU8(files['schema.json'])).schemaChanges).toEqual(changes)
+})
+
+it.each(['different', undefined])('rejects pages whose schema no longer matches the manifest: %s', async (token) => {
+  const request = api.rpc.getMockImplementation()
+  if (!request) throw new Error('Missing RPC mock')
+  api.rpc.mockImplementation(async (name, args) => {
+    const response = await request(name, args)
+    return { data: args.p_collection ? { ...response.data, schemaToken: token } : {
+      ...manifest, collections: manifest.collections.map(collection => ({ ...collection, schemaToken: 'initial' })),
+    }, error: null }
+  })
+  await expect(buildTenantExport('tenant', vi.fn())).rejects.toThrow(/ha cambiado.*Vuelve a iniciarla/)
+})
+
+it.each([
+  ['EXPORT_SCHEMA_CHANGED', /ha cambiado.*Vuelve a iniciarla/],
+  ['EXPORT_INVALID_CURSOR', /ha cambiado.*Vuelve a iniciarla/],
+  ['EXPORT_SCHEMA_UNAVAILABLE', /no permite una exportación segura/],
+])('reports actionable schema errors without blaming the owner session: %s', async (message, expected) => {
+  api.rpc.mockResolvedValue({ data: null, error: { code: '55000', message } })
+  await expect(buildTenantExport('tenant', vi.fn())).rejects.toThrow(expected)
+})

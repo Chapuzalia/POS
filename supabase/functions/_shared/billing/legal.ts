@@ -4,7 +4,7 @@ export const billingLegalVersion = '2026-11-13.4'
 export const billingLegalDocuments = {
   terms: { title: 'Términos y Condiciones', version: '1.4-saas.1', url: '/legal/2026-11-13-saas/condiciones-saas.html', sha256: '0505917093feae6deecd63a273dc9467578fba0112e480433c38c85a4704772c' },
   dpa: { title: 'Contrato de encargo del tratamiento (DPA)', version: '1.4-rgpd.1', url: '/legal/2026-11-13-rgpd/dpa.html', sha256: '32ff1a49508e2117242ae2ee3445b4f46b0d8d2724aeb351d2a0d4d0230fa643' },
-  privacy: { title: 'Información de privacidad (arts. 12 y 13 RGPD)', version: '1.4-rgpd.2', url: '/legal/2026-11-13-saas/privacidad.html', sha256: 'cc5a8986f795b32619176301dfd9ad011eb9973cea6bb7a20b422bf3fc51b2ee' },
+  privacy: { title: 'Información de privacidad', version: '1.4-rgpd.2', url: '/legal/2026-11-13-saas/privacidad.html', sha256: 'cc5a8986f795b32619176301dfd9ad011eb9973cea6bb7a20b422bf3fc51b2ee' },
   notice: { title: 'Aviso legal', version: '1.3-lssi.1', url: '/legal/2026-11-13-saas/aviso-legal.html', sha256: '0437daa91af7cfab5dbbfc0380c1f0142fae0d2de5274b0f5478c1f247908e2b' },
 } as const
 

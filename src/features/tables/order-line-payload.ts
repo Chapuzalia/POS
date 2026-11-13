@@ -30,8 +30,10 @@ export function buildCatalogOrderLinesPayload(lines: PersistableOrderLine[]) {
 }
 
 export function buildRestaurantOrderLinesPayload(detail: RestaurantOrderDetail) {
-  return buildCatalogOrderLinesPayload(detail.lines).map((line, index) => ({
+  // Repeated ids are snapshots of one line, not additional quantities.
+  const lines = [...new Map(detail.lines.map((line) => [line.id, line])).values()]
+  return buildCatalogOrderLinesPayload(lines).map((line, index) => ({
     ...line,
-    unitPriceCents: detail.lines[index].unitPriceCents,
+    unitPriceCents: lines[index].unitPriceCents,
   }))
 }

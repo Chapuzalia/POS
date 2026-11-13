@@ -6,10 +6,12 @@ import { UserFacingError } from '../../../utils/UserFacingError'
 const collectionName = z.string().regex(/^[a-z][a-z0-9_]*$/)
 const manifestSchema = z.object({
   format: z.literal('tickit-tenant-export'), schemaVersion: z.literal(1), readAt: z.string(),
-  collections: z.array(z.object({ name: collectionName, columns: z.array(z.object({ name: z.string(), type: z.string(), encoding: z.string() })).min(1) })).min(1),
+  collections: z.array(z.object({ name: collectionName, columns: z.array(z.object({ name: z.string(), type: z.string(), encoding: z.string() })).min(1), schemaToken: z.string().optional() })).min(1),
+  schemaChanges: z.array(z.object({ collection: collectionName, reason: z.enum(['table_unavailable', 'columns_unavailable']), columns: z.array(z.string()).optional() })).optional(),
 })
 const pageSchema = z.object({
   rows: z.array(z.string()), next: z.array(z.union([z.string(), z.number()])).nullable(), readAt: z.string(),
+  schemaToken: z.string().optional(),
   files: z.array(z.object({ id: z.string().uuid(), bucket: z.string().nullable(), path: z.string().nullable(), mimeType: z.string().nullable(), sha256: z.string().nullable() })).optional(),
 })
 
@@ -29,7 +31,11 @@ export async function buildTenantExport(tenantId: string, onProgress: (message: 
   const client = requireSupabase()
   async function request(collection: string | null, after: Array<string | number> | null) {
     const { data, error } = await client.rpc('export_tenant_data', { p_tenant_id: tenantId, p_collection: collection, p_after: after })
-    if (error) throw new UserFacingError('No se ha podido leer la exportación. Comprueba tu sesión de propietario y que el servidor esté actualizado.')
+    if (error) {
+      if (error.message === 'EXPORT_SCHEMA_CHANGED' || error.message === 'EXPORT_INVALID_CURSOR') throw new UserFacingError('La estructura de los datos ha cambiado durante la exportación. Vuelve a iniciarla.')
+      if (error.message === 'EXPORT_SCHEMA_UNAVAILABLE') throw new UserFacingError('La estructura de los datos no permite una exportación segura. Contacta con Alteil para revisarla.')
+      throw new UserFacingError('No se ha podido leer la exportación. Comprueba tu sesión de propietario y que el servidor esté actualizado.')
+    }
     return data
   }
   const manifestResult = manifestSchema.safeParse(await request(null, null))
@@ -51,6 +57,7 @@ export async function buildTenantExport(tenantId: string, onProgress: (message: 
       const pageResult = pageSchema.safeParse(await request(collection.name, after))
       if (!pageResult.success) throw new UserFacingError('El servidor ha devuelto una página de exportación no válida. Comprueba que esté actualizado.')
       const page = pageResult.data
+      if (collection.schemaToken && page.schemaToken !== collection.schemaToken) throw new UserFacingError('La estructura de los datos ha cambiado durante la exportación. Vuelve a iniciarla.')
       if (page.rows.length && (!page.next || JSON.stringify(page.next) === JSON.stringify(after))) throw new UserFacingError('La exportación no ha podido avanzar. Vuelve a intentarlo.')
       const rowIndexes = new Map<unknown, number>()
       page.rows.forEach((text, index) => {
@@ -88,6 +95,7 @@ export async function buildTenantExport(tenantId: string, onProgress: (message: 
   files['manifest.json'] = strToU8(JSON.stringify({
     format: manifest.format, schemaVersion: manifest.schemaVersion, startedAt: manifest.readAt, completedAt: new Date().toISOString(),
     consistency: 'live-paginated-reads', entries,
+    schemaChanges: manifest.schemaChanges ?? [],
     exclusions: ['Credenciales, sesiones, claves, emparejamiento y secretos de seguridad', 'Datos de otras empresas, reglas globales de OCR, diagnóstico e infraestructura de Alteil', 'Colas offline y configuraciones que solo permanecen en los dispositivos'],
     notes: ['Los identificadores mantienen las relaciones entre los datos; no son credenciales.', 'Los importes *cents son céntimos enteros; numeric y bigint se representan como texto decimal para conservar su precisión.', 'La lectura no bloquea las ventas. Puede haber cambios entre páginas; concilia los datos y repite la extracción final al completar la migración.', 'No se incluyen ficheros ya eliminados; sus metadatos conservan la fecha de eliminación.', 'Las imágenes de compras pueden estar normalizadas a WebP. file_hash identifica la entrada anterior a esa conversión; las huellas de este manifiesto identifican los bytes conservados y descargados.'],
   }, null, 2))

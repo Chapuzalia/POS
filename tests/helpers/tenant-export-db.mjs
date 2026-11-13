@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 
 export const exportSql = readFileSync(new URL('../../supabase/migrations/20261113151204_tenant_data_export.sql', import.meta.url), 'utf8')
+export const resilientExportSql = readFileSync(new URL('../../supabase/migrations/20261113212616_resilient_tenant_data_export.sql', import.meta.url), 'utf8')
 // Real column names/types from the baseline and subsequent migrations. Other
 // business triggers are outside this read-only API's focused integration fixture.
 export function exportSourceTables() {
@@ -11,17 +12,32 @@ export function exportSourceTables() {
   const tables = new Map()
   const type = '(uuid(?:\\[\\])?|text(?:\\[\\])?|timestamp(?: with(?:out)? time zone)?|timestamptz|time(?: without time zone)?|numeric(?:\\([\\d, ]+\\))?|bigint|smallint(?:\\[\\])?|integer|boolean|jsonb|date|double precision)'
   for (const source of sources) {
-    for (const [, name, body] of source.matchAll(/create table (?:if not exists )?public\.(\w+)\s*\(([\s\S]*?)\n\);/gi)) {
-      if (tables.has(name)) continue
-      const columns = new Map()
-      for (const [, column, sqlType] of body.matchAll(new RegExp(`(?:^|,)\\s*(\\w+)\\s+${type}(?=\\s|,|$)`, 'gmi'))) columns.set(column, sqlType)
-      tables.set(name, columns)
-    }
-    for (const [, name, body] of source.matchAll(/alter table\s+(?:only\s+)?(?:if exists\s+)?public\.(\w+)\s+([^;]+);/gi)) {
+    const statements = [
+      ...[...source.matchAll(/create table (?:if not exists )?public\.(\w+)\s*\(([\s\S]*?)\n\);/gi)].map(match => ({ kind: 'create', match })),
+      ...[...source.matchAll(/alter table\s+(?:only\s+)?(?:if exists\s+)?public\.(\w+)\s+([^;]+);/gi)].map(match => ({ kind: 'alter', match })),
+      ...[...source.matchAll(/drop\s+table\s+(?:if exists\s+)?public\.(\w+)/gi)].map(match => ({ kind: 'drop', match })),
+    ].sort((a, b) => a.match.index - b.match.index)
+    for (const { kind, match: [, name, body] } of statements) {
+      if (kind === 'drop') { tables.delete(name); continue }
+      if (kind === 'create') {
+        if (tables.has(name)) continue
+        const columns = new Map()
+        for (const [, column, sqlType] of body.matchAll(new RegExp(`(?:^|,)\\s*(\\w+)\\s+${type}(?=\\s|,|$)`, 'gmi'))) columns.set(column, sqlType)
+        tables.set(name, columns)
+        continue
+      }
       const columns = tables.get(name)
       if (!columns) continue
       for (const [, column, sqlType] of body.matchAll(new RegExp(`add\\s+(?:column\\s+)?(?:if not exists\\s+)?(\\w+)\\s+${type}(?=\\s|,|$)`, 'gi'))) columns.set(column, sqlType)
       for (const [, column] of body.matchAll(/drop\s+column\s+(?:if exists\s+)?(\w+)/gi)) columns.delete(column)
+      for (const [, column, sqlType] of body.matchAll(new RegExp(`alter\\s+(?:column\\s+)?(\\w+)\\s+(?:set\\s+data\\s+)?type\\s+${type}(?=\\s|,|$)`, 'gi'))) columns.set(column, sqlType)
+      const renamedColumn = body.match(/rename\s+column\s+(\w+)\s+to\s+(\w+)/i)
+      if (renamedColumn && columns.has(renamedColumn[1])) {
+        columns.set(renamedColumn[2], columns.get(renamedColumn[1]))
+        columns.delete(renamedColumn[1])
+      }
+      const renamedTable = body.match(/^rename\s+to\s+(\w+)/i)
+      if (renamedTable) { tables.set(renamedTable[1], columns); tables.delete(name) }
     }
   }
   return tables
@@ -58,7 +74,8 @@ export async function createExportDb(after) {
   const tables = exportSourceTables()
   for (const name of names) {
     const columns = tables.get(name)
-    if (!columns?.size) throw new Error(`No source schema for ${name}`)
+    // Retired tables must stay absent, just as they do on the deployed database.
+    if (!columns?.size) continue
     const keys = columns.has('id') ? ['id'] : composite[name]
     if (!keys) throw new Error(`No fixture primary key for ${name}`)
     await db.exec(`create table public.${name} (${[...columns].map(([key, type]) => `${key} ${type}`).join(',')}, primary key(${keys.join(',')}))`)
@@ -66,5 +83,6 @@ export async function createExportDb(after) {
   await db.exec(`alter table tickets add foreign key(user_id) references profiles(id);
     alter table tenant_memberships add foreign key(user_id) references profiles(id);`)
   await db.exec(exportSql)
+  await db.exec(resilientExportSql)
   return db
 }

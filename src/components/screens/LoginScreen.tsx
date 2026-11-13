@@ -107,7 +107,7 @@ export function LoginScreen({
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <p className="text-xs leading-relaxed text-[var(--muted)]">
-            El restaurante es responsable de tus datos de usuario operativo y Alteil los trata por su cuenta. Alteil es responsable de su relación comercial y de la protección de su plataforma, por contrato o interés legítimo según la finalidad. Derechos: <a className="underline" href="mailto:info@alteilsolutions.com">info@alteilsolutions.com</a>. <a className="inline-flex min-h-11 items-center underline" href={billingLegalDocuments.privacy.url} target="_blank" rel="noreferrer">Información completa de privacidad</a>.
+            
           </p>
           <label className="block">
             <span className="text-sm font-semibold text-[var(--muted)]">
@@ -177,6 +177,7 @@ export function LoginScreen({
         <nav aria-label="Información legal" className="mt-5 flex flex-wrap justify-center gap-x-4 text-sm">
           {[billingLegalDocuments.notice, billingLegalDocuments.privacy].map(doc => <a key={doc.url} className="inline-flex min-h-11 items-center text-[var(--muted)] underline" href={doc.url} target="_blank" rel="noreferrer">{doc.title}</a>)}
         </nav>
+        
       </section>
 
       {conflictAccountName ? (

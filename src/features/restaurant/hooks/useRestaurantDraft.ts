@@ -4,6 +4,7 @@ import { quantityAmountCents } from '../../../lib/format'
 import type { RestaurantOrderDetail, RestaurantOrderSaveState } from '../../tables/types'
 import type { TenantContext } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
+import { isTransportError } from '../../../lib/observability.ts'
 import { isRestaurantRevisionConflict, shouldFlushRestaurantDraft } from '../draft-policy'
 
 
@@ -87,19 +88,28 @@ export function useRestaurantDraft({ context, isOnline, onError }: UseRestaurant
         updateSaveState(hasNewerEdits ? 'dirty' : 'saved')
         return reconciled
       } catch (saveError) {
+        if (orderRef.current?.order.id !== draft.order.id) return null
         if (isRestaurantRevisionConflict(saveError) && context) {
           try {
-            const remoteOrder = await loadRestaurantOrder(context, draft.order.id)
+            const remoteOrder = await loadRestaurantOrder(context, draft.order.id).catch(async (reloadError) => {
+              if (!isTransportError(reloadError)) throw reloadError
+              await new Promise<void>((resolve) => window.setTimeout(resolve, 300))
+              return loadRestaurantOrder(context, draft.order.id)
+            })
+            if (orderRef.current?.order.id !== draft.order.id) return null
             replaceOrder(remoteOrder)
             onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
           } catch (reloadError) {
+            if (orderRef.current?.order.id !== draft.order.id) return null
             updateSaveState('error')
-            onError(getReadableError(reloadError, { operation: 'features.restaurant.hooks.useRestaurantDraft' }))
+            onError(getReadableError(reloadError, { operation: 'features.restaurant.hooks.useRestaurantDraft', step: 'reload', recoverable: true },
+              isTransportError(reloadError) ? 'No se ha podido recargar la comanda por un problema de conexión. El borrador sigue pendiente de guardar. Vuelve a intentarlo cuando se restablezca la conexión.' : undefined))
           }
           return null
         }
         updateSaveState('error')
-        onError(getReadableError(saveError, { operation: 'features.restaurant.hooks.useRestaurantDraft' }))
+        onError(getReadableError(saveError, { operation: 'features.restaurant.hooks.useRestaurantDraft', step: 'save', recoverable: true },
+          isTransportError(saveError) ? 'No se ha podido guardar la comanda por un problema de conexión. El borrador sigue pendiente de guardar. Vuelve a intentarlo cuando se restablezca la conexión.' : undefined))
         return null
       }
     })()

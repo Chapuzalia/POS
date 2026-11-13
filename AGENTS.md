@@ -81,6 +81,13 @@ This is a production-oriented, multi-tenant POS/CRM/KDS. Favor correctness of sa
 - MUST Use the docs/safe-production-migrations.md as a guide
 - MUST Check contracts-pending.yml when create a new migration, if the contracts refers to migrations already merged to main, applu the contracts in the migration being created
 
+## Tenant data export and SQL evolution
+
+- Include export compatibility in every change to tenant-owned SQL data; do not leave it for the user to discover after a failed or incomplete download.
+- The export RPC discovers existing approved columns, types and primary keys at runtime. Ordinary removals must remain compatible and be reported in the archive's `schemaChanges`.
+- When adding or renaming business tables/columns or changing their meaning, update the reviewed `tenant_export_spec()` through a new migration and the public export dictionary as part of the same task. Classify new data deliberately; never export every column/table automatically or include credentials, infrastructure data or another tenant's data.
+- Preserve scope, historical snapshots, numeric precision, original attachments and stable pagination. Run `pnpm exec vitest run tests/functional/tenant-export-db.test.ts tests/functional/tenant-export.test.ts tests/functional/tenant-export-ui.test.ts` for these SQL changes, including coverage of the new schema shape.
+
 ## Sales, money and fiscal invariants
 
 - Transactional money uses integer cents (`*Cents`). Do not use floating-point arithmetic for sale/payment/cash totals.

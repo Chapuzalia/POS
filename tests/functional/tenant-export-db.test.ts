@@ -44,16 +44,22 @@ it('executes every collection against actual source column names and exposes no 
   const manifest = await call()
   expect(manifest.format).toBe('tickit-tenant-export')
   const published = JSON.parse(readFileSync(new URL('../../public/legal/export-schema-v1.json', import.meta.url), 'utf8'))
-  expect(published.collections.map((item: { name: string }) => item.name)).toEqual(manifest.collections.map((item: { name: string }) => item.name))
+  const tables = exportSourceTables()
+  expect(published.collections.filter((item: { name: string }) => tables.has(item.name)).map((item: { name: string }) => item.name)).toEqual(manifest.collections.map((item: { name: string }) => item.name))
   for (const collection of manifest.collections) {
     const schema = published.collections.find((item: { name: string }) => item.name === collection.name)
-    expect(schema.columns.map((item: { name: string }) => item.name).sort()).toEqual(collection.columns.map((item: { name: string }) => item.name).sort())
+    const available = schema.columns.filter((item: { name: string }) => tables.get(collection.name)?.has(item.name) || (collection.name === 'profiles' && item.name === 'email'))
+    expect(available.map((item: { name: string }) => item.name).sort()).toEqual(collection.columns.map((item: { name: string }) => item.name).sort())
   }
-  const tables = exportSourceTables()
   const specs = (await db.query('select * from public.tenant_export_spec()')).rows
   for (const spec of specs) {
+    if (!tables.has(spec.collection)) {
+      expect(manifest.schemaChanges).toContainEqual({ collection: spec.collection, reason: 'table_unavailable' })
+      await expect(call(spec.collection)).rejects.toThrow(/EXPORT_SCHEMA_CHANGED/)
+      continue
+    }
     const absent = spec.fields.split(',').filter((field: string) => !tables.get(spec.collection)?.has(field))
-    expect(absent, spec.collection).toEqual([])
+    if (absent.length) expect(manifest.schemaChanges).toContainEqual({ collection: spec.collection, reason: 'columns_unavailable', columns: absent })
     await expect(call(spec.collection)).resolves.toHaveProperty('rows')
   }
   expect(JSON.stringify(manifest)).not.toMatch(/future_secret|is_superadmin|storage_path|global_supplier|api_key/)
@@ -131,11 +137,84 @@ it('does not compare normalized document bytes against the original input finger
   }
 })
 
-it('fails explicitly when the installed schema cannot supply a required field', async () => {
-  await db.exec('reset role; begin; alter table products drop column description')
+it('does not recreate inventory tables retired by source migrations', async () => {
+  for (const table of ['inventory_product_settings', 'inventory_product_format_consumptions']) {
+    expect(exportSourceTables().has(table)).toBe(false)
+    expect((await db.query('select to_regclass($1) rel', [`public.${table}`])).rows[0].rel).toBeNull()
+    expect((await call()).collections.map((item: { name: string }) => item.name)).not.toContain(table)
+  }
+  await expect(call('inventory_items')).resolves.toHaveProperty('rows')
+  await expect(call('inventory_recipes')).resolves.toHaveProperty('rows')
+})
+
+it('adapts retired tables, renamed or removed fields and changed types without exposing new fields', async () => {
+  await db.exec(`reset role; begin;
+    drop table device_user_assignments;
+    alter table products drop column description;
+    alter table products rename column name to renamed_name;
+    alter table products alter column sort_order type bigint;
+    update products set sort_order=9007199254740993 where id='${id(46)}'`)
   try {
     await as(owner)
+    const manifest = await call()
+    expect(manifest.schemaChanges).toEqual(expect.arrayContaining([
+      { collection: 'device_user_assignments', reason: 'table_unavailable' },
+      { collection: 'products', reason: 'columns_unavailable', columns: ['name', 'description'] },
+    ]))
+    expect(manifest.collections.find((item: { name: string }) => item.name === 'products').columns).toContainEqual({ name: 'sort_order', type: 'bigint', encoding: 'decimal-string' })
+    const page = await call('products')
+    expect(page.rows[0].sort_order).toBe('9007199254740993')
+    expect(page.rows[0]).not.toHaveProperty('description')
+    expect(page.rows[0]).not.toHaveProperty('name')
+    expect(page.rows[0]).not.toHaveProperty('renamed_name')
+    expect(page.rows[0]).not.toHaveProperty('future_secret')
+    expect(page.schemaToken).toBe(manifest.collections.find((item: { name: string }) => item.name === 'products').schemaToken)
+    await expect(call('device_user_assignments')).rejects.toThrow(/EXPORT_SCHEMA_CHANGED/)
+  } finally {
+    await db.exec('rollback; reset role')
+  }
+})
+
+it('uses current primary keys and marks schema changes between manifest and pages', async () => {
+  const before = (await call()).collections.find((item: { name: string }) => item.name === 'products')
+  await db.exec('reset role; begin; alter table products drop constraint products_pkey; alter table products add primary key(id,name)')
+  try {
+    await as(owner)
+    const page = await call('products')
+    expect(page.schemaToken).not.toBe(before.schemaToken)
+    expect(page.next).toEqual([id(46), 'Producto'])
+    expect((await call('products', page.next)).rows).toEqual([])
+    await expect(call('products', [id(46)])).rejects.toThrow(/EXPORT_INVALID_CURSOR/)
+  } finally {
+    await db.exec('rollback; reset role')
+  }
+})
+
+it.each([
+  'alter table products drop column tenant_id',
+  'alter table products drop constraint products_pkey',
+  'alter table products drop constraint products_pkey; alter table products add primary key(future_secret)',
+  'alter table product_images drop column storage_path',
+])('refuses unsafe export when scope, stable pagination or original file ownership is unavailable: %s', async (change) => {
+  await db.exec(`reset role; begin; ${change}`)
+  try {
+    await as(owner)
+    await db.exec('savepoint before_failed_export')
     await expect(call()).rejects.toThrow(/EXPORT_SCHEMA_UNAVAILABLE/)
+    await db.exec('rollback to savepoint before_failed_export')
+    await expect(call(change.includes('product_images') ? 'product_images' : 'products')).rejects.toThrow(/EXPORT_SCHEMA_UNAVAILABLE/)
+  } finally {
+    await db.exec('rollback; reset role')
+  }
+})
+
+it('excludes INCLUDE columns from primary-key pagination', async () => {
+  await db.exec('reset role; begin; alter table products drop constraint products_pkey; alter table products add primary key(id) include(name)')
+  try {
+    await as(owner)
+    const page = await call('products')
+    expect(page.next).toEqual([id(46)])
+    expect((await call('products', page.next)).rows).toEqual([])
   } finally {
     await db.exec('rollback; reset role')
   }
