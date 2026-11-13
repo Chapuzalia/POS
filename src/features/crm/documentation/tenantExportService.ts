@@ -44,6 +44,7 @@ export async function buildTenantExport(tenantId: string, onProgress: (message: 
   if (new Set(manifest.collections.map(item => item.name)).size !== manifest.collections.length) throw new UserFacingError('El índice de la exportación no es válido.')
   const files: Record<string, Uint8Array> = {}
   const entries: Array<{ file: string; rows?: number; bytes: number; sha256: string; readAt?: string }> = []
+  const missingFiles: Array<{ collection: string; id: string; file: string; reason: 'not_found' | 'missing_reference' }> = []
   async function add(file: string, bytes: Uint8Array<ArrayBuffer>, metadata: { rows?: number; readAt?: string } = {}) {
     if (files[file]) throw new UserFacingError('El servidor ha devuelto un fichero duplicado.')
     files[file] = bytes
@@ -70,12 +71,6 @@ export async function buildTenantExport(tenantId: string, onProgress: (message: 
         }
       })
       for (const attachment of page.files ?? []) {
-        if (!attachment.bucket || !attachment.path) throw new UserFacingError('Un documento no tiene su fichero original. Contacta con Alteil para completar la exportación.')
-        const { data: blob, error } = await client.storage.from(attachment.bucket).download(attachment.path)
-        if (error || !blob) throw new UserFacingError('No se ha podido descargar un fichero. No se ha generado una exportación incompleta; vuelve a intentarlo o contacta con Alteil.')
-        const bytes = new Uint8Array(await blob.arrayBuffer())
-        const digest = await hash(bytes)
-        if (attachment.sha256 && attachment.sha256.toLowerCase() !== digest) throw new UserFacingError('Un fichero ha cambiado o no supera la comprobación de integridad. Repite la exportación o contacta con Alteil.')
         const extension = ({ 'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/avif': '.avif', 'image/gif': '.gif', 'application/pdf': '.pdf' } as Record<string, string>)[attachment.mimeType ?? ''] ?? '.bin'
         const file = `assets/${collection.name}/${attachment.id}${extension}`
         const rowIndex = rowIndexes.get(attachment.id)
@@ -83,6 +78,20 @@ export async function buildTenantExport(tenantId: string, onProgress: (message: 
         // Preserve the server's exact numeric literals, including nested snapshots.
         const row = page.rows[rowIndex].trimEnd()
         page.rows[rowIndex] = `${row.slice(0, -1)},"attachment":${JSON.stringify(file)}}`
+        if (!attachment.bucket || !attachment.path) {
+          missingFiles.push({ collection: collection.name, id: attachment.id, file, reason: 'missing_reference' })
+          continue
+        }
+        const { data: blob, error } = await client.storage.from(attachment.bucket).download(attachment.path)
+        // Storage can return HTTP 400 with a semantic 404 in the response body.
+        if (error && (Number(error.statusCode) === 404 || error.status === 404 || error.statusCode === 'NoSuchKey')) {
+          missingFiles.push({ collection: collection.name, id: attachment.id, file, reason: 'not_found' })
+          continue
+        }
+        if (error || !blob) throw new UserFacingError('No se ha podido descargar un fichero. Comprueba tu conexión y permisos y vuelve a intentarlo.')
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        const digest = await hash(bytes)
+        if (attachment.sha256 && attachment.sha256.toLowerCase() !== digest) throw new UserFacingError('Un fichero ha cambiado o no supera la comprobación de integridad. Repite la exportación o contacta con Alteil.')
         await add(file, bytes)
       }
       pageNumber += 1
@@ -94,7 +103,7 @@ export async function buildTenantExport(tenantId: string, onProgress: (message: 
   await add('schema.json', strToU8(JSON.stringify(manifest, null, 2)))
   files['manifest.json'] = strToU8(JSON.stringify({
     format: manifest.format, schemaVersion: manifest.schemaVersion, startedAt: manifest.readAt, completedAt: new Date().toISOString(),
-    consistency: 'live-paginated-reads', entries,
+    consistency: 'live-paginated-reads', entries, missingFiles,
     schemaChanges: manifest.schemaChanges ?? [],
     exclusions: ['Credenciales, sesiones, claves, emparejamiento y secretos de seguridad', 'Datos de otras empresas, reglas globales de OCR, diagnóstico e infraestructura de Alteil', 'Colas offline y configuraciones que solo permanecen en los dispositivos'],
     notes: ['Los identificadores mantienen las relaciones entre los datos; no son credenciales.', 'Los importes *cents son céntimos enteros; numeric y bigint se representan como texto decimal para conservar su precisión.', 'La lectura no bloquea las ventas. Puede haber cambios entre páginas; concilia los datos y repite la extracción final al completar la migración.', 'No se incluyen ficheros ya eliminados; sus metadatos conservan la fecha de eliminación.', 'Las imágenes de compras pueden estar normalizadas a WebP. file_hash identifica la entrada anterior a esa conversión; las huellas de este manifiesto identifican los bytes conservados y descargados.'],
