@@ -1,8 +1,10 @@
 import { Input } from '../../components/ui/Input'
 import type { BillingProfile } from '../../../supabase/functions/_shared/billing/profile'
+import { BillingPrivacyNotice } from './BillingPrivacyNotice'
 
 export function BillingProfileFields({ value, disabled, onChange }: { value: BillingProfile; disabled: boolean; onChange: (value: BillingProfile) => void }) {
   return <div className="!grid !gap-3 sm:!grid-cols-2">
+    <div className="sm:!col-span-2"><BillingPrivacyNotice /></div>
     {([
       ['legalName', 'Razón social', 'organization'], ['taxId', 'NIF/CIF', 'off'], ['email', 'Email de facturación', 'email'],
     ] as const).map(([key, label, autoComplete]) => <label key={key} className="!grid !gap-1 !text-sm">{label}<Input className="!min-h-11" autoComplete={autoComplete} type={key === 'email' ? 'email' : 'text'} value={value[key]} disabled={disabled} maxLength={key === 'taxId' ? 40 : key === 'email' ? 254 : 200} onChange={event => onChange({ ...value, [key]: event.target.value })} /></label>)}

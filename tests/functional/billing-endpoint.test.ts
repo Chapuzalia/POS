@@ -145,7 +145,7 @@ it('changes the direct-debit IBAN only for the owner', async () => {
   const response = await owner.send(body)
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({ mandateId: 'mdt_new', last4: '1332' })
-  expect(owner.changeMandate).toHaveBeenCalledWith(tenantId, tenantId, { accountHolder: 'Titular SL', iban: 'ES91 2100 0418 4502 0005 1332' })
+  expect(owner.changeMandate).toHaveBeenCalledWith(tenantId, tenantId, { accountHolder: 'Titular SL', iban: 'ES91 2100 0418 4502 0005 1332' }, 'admin')
   const admin = endpoint()
   expect((await admin.send(body)).status).toBe(403)
   expect(admin.changeMandate).not.toHaveBeenCalled()

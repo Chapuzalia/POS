@@ -20,7 +20,7 @@ Deno.serve(async request => {
     if (accounts.error) throw new Error('BILLING_DB_BATCH')
     let succeeded = 0, failed = 0
     for (const account of accounts.data) {
-      try { await service.reconcile(account.tenant_id); succeeded++ } catch { failed++ }
+      try { const result = await service.reconcile(account.tenant_id); if (result.sepaWarning) failed++; else succeeded++ } catch { failed++ }
     }
     return Response.json({ succeeded, failed }, { status: failed ? 503 : 200 })
   } catch { return Response.json({ error: 'Reconciliation unavailable' }, { status: 503 }) }

@@ -1,4 +1,5 @@
 import { welcomeLogoBase64 } from './welcome-email-logo.ts'
+import { billingLegalDocuments } from './billing/legal.ts'
 
 export type WelcomeEmailStatus = 'sent' | 'not_configured' | 'failed' | 'unknown'
 
@@ -27,6 +28,8 @@ export async function sendWelcomeEmail(input: WelcomeEmailInput, config: Welcome
     loginUrl = new URL('/crm', appUrl)
   } catch { return 'not_configured' }
 
+  const privacyUrl = new URL(billingLegalDocuments.privacy.url, loginUrl).href
+  const privacyNotice = 'Alteil Solutions SL trata los datos de contacto facilitados para crear la cuenta y gestionar su relación profesional, por contrato cuando eres parte o por interés legítimo en la relación B2B. Si los facilita el negocio o su representante, esa es su procedencia. Derechos y oposición: info@alteilsolutions.com.'
   const nextStep = 'Ya puedes iniciar sesión y acceder a tu negocio.'
   const body = JSON.stringify(input.billingMode === 'stripe' ? {
     to: [input.ownerEmail],
@@ -39,6 +42,7 @@ export async function sendWelcomeEmail(input: WelcomeEmailInput, config: Welcome
         USER_EMAIL: escapeHtml(input.ownerEmail),
         INITIAL_PASSWORD: escapeHtml(input.ownerPassword),
         LOGIN_URL: escapeHtml(loginUrl.href),
+        PRIVACY_URL: escapeHtml(privacyUrl),
       },
     },
   } : {
@@ -46,7 +50,7 @@ export async function sendWelcomeEmail(input: WelcomeEmailInput, config: Welcome
     reply_to: welcomeReplyTo,
     to: [input.ownerEmail],
     subject: 'Bienvenido a Tickit · Tus datos de acceso',
-    text: `Hola ${input.ownerFullName},\n\nTu negocio ${input.tenantName} ya está creado en Tickit.\n\nUsuario: ${input.ownerEmail}\nContraseña inicial: ${input.ownerPassword}\nAcceder a Tickit: ${loginUrl.href}\n\n${nextStep}\n\nSi necesitas ayuda, responde a este correo o escribe a ${welcomeReplyTo}.\n\nEl equipo de Tickit`,
+    text: `Hola ${input.ownerFullName},\n\nTu negocio ${input.tenantName} ya está creado en Tickit.\n\nUsuario: ${input.ownerEmail}\nContraseña inicial: ${input.ownerPassword}\nAcceder a Tickit: ${loginUrl.href}\n\n${nextStep}\n\nSi necesitas ayuda, responde a este correo o escribe a ${welcomeReplyTo}.\n\nEl equipo de Tickit\n\nPrivacidad: ${privacyNotice}\nInformación completa: ${privacyUrl}`,
     html: `<!doctype html>
 <html lang="es">
 <head>
@@ -91,6 +95,7 @@ export async function sendWelcomeEmail(input: WelcomeEmailInput, config: Welcome
         <tr><td class="content-padding" style="padding:24px 40px 28px;border-top:1px solid #e8edf3">
           <p style="margin:0 0 6px;color:#17243b;font-size:13px;line-height:20px;font-weight:bold">Estamos para ayudarte</p>
           <p style="margin:0;color:#64748b;font-size:12px;line-height:20px">Responde a este correo o contacta con <a href="mailto:${welcomeReplyTo}" style="color:#1478ed;text-decoration:none">${welcomeReplyTo}</a>.</p>
+          <p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:20px">${escapeHtml(privacyNotice)} <a href="${escapeHtml(privacyUrl)}" style="color:#1478ed;text-decoration:underline">Información completa de privacidad</a>.</p>
         </td></tr>
       </table>
       <p style="margin:20px 0 0;color:#8995a6;font-size:11px;line-height:18px">Tickit &middot; Acceso a tu cuenta</p>

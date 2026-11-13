@@ -104,7 +104,7 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
     {acceptedContract ? <BillingLegalReceipt acceptance={acceptedContract} /> : null}
     {detail?.legalAcceptances?.filter(acceptance => acceptance.operation_id !== acceptedContract?.operation_id).map(acceptance => <BillingLegalReceipt key={acceptance.operation_id} acceptance={acceptance} />)}
     {quote ? <AppModal label="Revisar pago del plan" theme="crm" maxWidth={520} dismissDisabled={busy} onClose={() => setQuote(null)}><div className="!grid !gap-4 !p-6"><h3 className="!m-0 !text-lg !font-bold">Confirma tu suscripción</h3><BillingOfferSummary quote={quote} catalog={catalog} />
-      <SepaMandateFields value={sepa} disabled={locked} onChange={setSepa} />
+      <SepaMandateFields value={sepa} disabled={locked} onChange={setSepa} referenceId={quote.id} />
       <BillingLegalAcceptance value={legal} disabled={locked} onChange={setLegal} />
       {error ? <p role="alert" className="!text-sm !text-[var(--crm-red)]">{error}</p> : null}<div className="!flex !flex-wrap !justify-end !gap-3"><Button disabled={locked} onClick={() => setQuote(null)}>Volver</Button><Button variant="primary" disabled={locked || !sepaFormReady(sepa) || !legalAcceptanceReady(legal)} onClick={() => void run(async () => {
       const result = await billingRequest<{ url?: string; acceptance?: Receipt }>({ action: 'confirm', tenantId, operationId: quote.id, ...sepaConfirmInput(sepa), legal })

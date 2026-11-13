@@ -13,6 +13,10 @@ import type { BillingAddress, BillingProfile } from './profile.ts'
 import { invoiceServiceSnapshot } from './invoice-description.ts'
 import { billingLegalDocuments, billingLegalVersion, requireBillingLegalAcceptance } from './legal.ts'
 import type { BillingLegalInput, BillingLegalReceipt } from './legal.ts'
+import { mandateReference, noticeWindowOpen, requireSepaAuthorization, sepaEvidence, sepaPreNotificationDays } from './sepa.ts'
+import type { SepaEvidence, SepaInput, SepaRecord } from './sepa.ts'
+import { notifySepa } from './sepa-notices.ts'
+import type { SepaNoticeSender } from './sepa-notices.ts'
 
 // shortcut: the stripe_* columns/keys are kept (expand-only migrations) and now hold Mollie IDs (cst_, sub_, tr_); rename them in a contract migration.
 export type Account = {
@@ -38,7 +42,7 @@ export type Operation = {
   stripe_params: ProviderParams
   result: { url?: string; paymentId?: string; mandateId?: string; scheduleId?: string } | null; created_at: string; proration_date: number; effective_at: string | null
 }
-export type ConfirmInput = { sepa?: { accountHolder: string; iban: string }; payer?: Pick<BillingProfile, 'legalName' | 'taxId'> & Partial<Pick<BillingProfile, 'email' | 'address'>>; acceptLosses?: boolean; legal?: BillingLegalInput }
+export type ConfirmInput = { sepa?: SepaInput; payer?: Pick<BillingProfile, 'legalName' | 'taxId'> & Partial<Pick<BillingProfile, 'email' | 'address'>>; acceptLosses?: boolean; legal?: BillingLegalInput }
 // What the owner chose to switch off (downgrade) or back on (upgrade) with a plan change.
 export type AccessRequest = { deactivateVenueIds: string[]; deactivateDeviceIds: string[]; reactivateVenueIds: string[] }
 type UsageVenue = { id: string; name: string; is_active: boolean }
@@ -86,8 +90,10 @@ export class BillingService {
   readonly appUrl: string
   readonly webhookUrl: string
   readonly odoo: OdooGateway | null
-  constructor(db: SupabaseClient, mollie: MollieGateway, appUrl: string, webhookUrl: string, odoo: OdooGateway | null = null) {
+  readonly sepaNotices: SepaNoticeSender | undefined
+  constructor(db: SupabaseClient, mollie: MollieGateway, appUrl: string, webhookUrl: string, odoo: OdooGateway | null = null, sepaNotices?: SepaNoticeSender) {
     this.db = db; this.mollie = mollie; this.appUrl = appUrl; this.webhookUrl = webhookUrl; this.odoo = odoo
+    this.sepaNotices = sepaNotices
   }
 
   async transition<T>(action: string, data: object): Promise<T> {
@@ -161,7 +167,14 @@ export class BillingService {
     }
     const legal = await this.db.rpc('billing_legal_receipts', { p_tenant_id: tenantId, p_data: {} })
     if (legal.error) throw new Error('BILLING_DB_LEGAL')
-    return { account, legalAcceptances: legal.data, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, paymentMethod: await this.paymentMethod(account), invoices: invoiceRows, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
+    const sepa = await this.db.from('billing_audit').select('id,details,created_at').eq('tenant_id', tenantId).in('action', ['sepa_authorization', 'sepa_notice', 'sepa_review']).order('created_at', { ascending: false }).limit(100).returns<{ id: string; created_at: string; details: { evidence?: SepaEvidence; status?: string; dueDate?: string; amountCents?: number; reference?: string; recipient?: string; sentAt?: string } }[]>()
+    if (sepa.error) throw new Error('BILLING_DB_SEPA')
+    const sepaRecords: SepaRecord[] = (sepa.data ?? []).map(row => ({
+      id: row.id, createdAt: row.created_at,
+      ...(row.details.evidence ? { evidence: row.details.evidence } : {}),
+      ...(typeof row.details.amountCents === 'number' && row.details.dueDate && row.details.reference && row.details.status ? { notice: { status: row.details.status, dueDate: row.details.dueDate, amountCents: row.details.amountCents, reference: row.details.reference, recipient: row.details.recipient ?? '', ...(row.details.sentAt ? { sentAt: row.details.sentAt } : {}) } } : {}),
+    }))
+    return { account, sepaRecords, legalAcceptances: legal.data, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, paymentMethod: await this.paymentMethod(account), invoices: invoiceRows, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
   }
   // Masked direct-debit account of the live subscription. Never returns or logs the full IBAN.
   async paymentMethod(account: Account) {
@@ -449,12 +462,15 @@ export class BillingService {
     return payments.find(row => row.metadata?.tickit_operation_id === op.id && row.metadata.tickit_kind === kind) ?? null
   }
   async sepaMandate(op: Operation, customerId: string, accountHolder: string | undefined, iban: string | null, release: boolean) {
-    const reference = `TICKIT-${op.id.slice(0, 8).toUpperCase()}`
+    const reference = mandateReference(op.id)
     const mandates = await this.mollie.list<MollieMandate>(`/customers/${customerId}/mandates`, 'mandates')
-    const existing = mandates.find(row => row.mandateReference === reference && row.method === 'directdebit' && ['valid','pending'].includes(row.status))
+    const legacy = op.stripe_params.legalVersion !== billingLegalVersion ? `TICKIT-${op.id.slice(0, 8).toUpperCase()}` : null
+    const existing = mandates.find(row => (row.mandateReference === reference || legacy !== null && row.mandateReference === legacy) && row.method === 'directdebit' && ['valid','pending'].includes(row.status))
     if (existing) return existing
     if (!iban || !accountHolder) throw new Error('BILLING_SEPA_REQUIRED')
-    return this.mutate(op, () => this.mollie.request<MollieMandate>('POST', `/customers/${customerId}/mandates`, { method: 'directdebit', consumerName: accountHolder, consumerAccount: iban, signatureDate: dateOnly(now()), mandateReference: reference }, `tickit:${op.id}:mandate`), release)
+    const authorization = (await this.legalAcceptance(op.tenant_id, op.id))?.receipt.sepa
+    if (!authorization) throw new Error('BILLING_SEPA_AUTHORIZATION_REQUIRED')
+    return this.mutate(op, () => this.mollie.request<MollieMandate>('POST', `/customers/${customerId}/mandates`, { method: 'directdebit', consumerName: accountHolder, consumerAccount: iban, signatureDate: authorization.acceptedAt.slice(0, 10), mandateReference: reference }, `tickit:${op.id}:mandate`), release)
   }
   async confirm(tenantId: string, actorId: string, operationId: string, retry = false, input: ConfirmInput = {}) {
     const before = await this.db.from('billing_operations').select('*').eq('id', operationId).eq('tenant_id', tenantId).single<Operation>()
@@ -467,8 +483,15 @@ export class BillingService {
     const iban = input.sepa ? normalizeIban(input.sepa.iban) : null
     if (signup && !retry && !iban) throw new Error('BILLING_SEPA_REQUIRED')
     if (signup && !retry) requireBillingLegalAcceptance(input.legal)
+    if (signup && !retry) requireSepaAuthorization(input.sepa?.authorization)
     if (signup && retry && before.data.stripe_params.legalVersion && !await this.legalAcceptance(tenantId, operationId)) throw new Error('BILLING_LEGAL_REQUIRED')
     if (!retry && before.data.preview.losses?.length && input.acceptLosses !== true) throw new Error('BILLING_LOSSES_NOT_ACCEPTED')
+    if (!signup && !retry && before.data.kind === 'change' && before.data.contract) {
+      const current = await this.subscription(await this.account(tenantId))
+      const next = before.data.stripe_params.phases?.length && current?.nextPaymentDate
+        ? phaseAt(before.data.stripe_params.phases, epoch(current.nextPaymentDate))?.contract ?? before.data.contract : before.data.contract
+      if (current?.nextPaymentDate && (cents(current.amount) !== grossCents(next.recurringCents) || current.interval !== mollieInterval(next.interval)) && !noticeWindowOpen(current.nextPaymentDate, new Date(), await this.sepaDaysForMandate(tenantId, current.customerId, current.mandateId))) throw new Error('BILLING_SEPA_NOTICE_WINDOW')
+    }
     if (!retry && before.data.stripe_params.baseline) {
       const sub = await this.subscription(await this.account(tenantId))
       if (!sub || baseline(sub) !== before.data.stripe_params.baseline) throw new Error('BILLING_STALE_PROVIDER_QUOTE')
@@ -482,6 +505,7 @@ export class BillingService {
         version: billingLegalVersion, documents: billingLegalDocuments,
         declarations: { terms: true, dpa: true, businessRepresentative: true },
         payer: { legalName: input.payer.legalName, taxId: input.payer.taxId, ...(input.payer.email ? { email: input.payer.email } : {}) },
+        sepa: await sepaEvidence({ ...input.sepa, accountHolder: input.sepa?.accountHolder ?? '', iban: iban ?? '' }, actorId, tenantId, mandateReference(operationId)),
         contract: before.data.contract,
         offer: { amountDueCents: before.data.preview.amountDueCents, recurringNetCents: before.data.contract.recurringCents, recurringGrossCents: grossCents(before.data.contract.recurringCents), vatBasisPoints: 2100, currency: 'EUR', interval: before.data.contract.interval, automaticRenewal: true, firstPayment: 'card', renewals: 'sepa' },
       }
@@ -575,23 +599,34 @@ export class BillingService {
   }
   // New IBAN for the renewals: a new SEPA mandate replaces the subscription's one, then older direct-debit mandates are revoked.
   // requestId makes a repeated click reuse the same mandate. The IBAN goes to Mollie only; it is never stored or logged.
-  async changeMandate(tenantId: string, requestId: string, sepa: { accountHolder: string; iban: string }) {
+  async changeMandate(tenantId: string, requestId: string, sepa: SepaInput, actorId: string) {
+    requireSepaAuthorization(sepa.authorization)
     const iban = normalizeIban(sepa.iban)
     const account = await this.account(tenantId)
     const sub = await this.subscription(account)
     if (!sub || sub.status !== 'active') throw new Error('BILLING_SUBSCRIPTION_REQUIRED')
     // A debit already accepted on the old mandate must settle first; the change would otherwise race it.
     if (['processing','pending'].includes(account.last_payment_status ?? '') || (await this.inflight(tenantId)).some(op => op.status !== 'scheduled')) throw new Error('BILLING_PENDING_CHANGE')
+    if (sub.nextPaymentDate && !noticeWindowOpen(sub.nextPaymentDate, new Date(), sepaPreNotificationDays)) throw new Error('BILLING_SEPA_NOTICE_WINDOW')
     const path = `/customers/${sub.customerId}/mandates`
-    const reference = `TICKIT-M-${requestId.slice(0, 8).toUpperCase()}`
+    const reference = mandateReference(requestId, true)
+    const evidence = await sepaEvidence({ ...sepa, iban }, actorId, tenantId, reference)
+    const prior = await this.db.from('billing_audit').select('details').eq('tenant_id', tenantId).eq('action', 'sepa_authorization').eq('details->>requestId', requestId).limit(1).returns<{ details: { evidence: SepaEvidence } }[]>()
+    if (prior.error) throw new Error('BILLING_DB_SEPA')
+    const saved = prior.data?.[0]?.details.evidence
+    if (saved && (saved.ibanSha256 !== evidence.ibanSha256 || saved.accountHolder !== evidence.accountHolder || saved.actorId !== actorId)) throw new Error('BILLING_STALE')
+    if (!saved) {
+      const recorded = await this.db.from('billing_audit').insert({ tenant_id: tenantId, actor_id: actorId, action: 'sepa_authorization', reason: 'Autorización electrónica de domiciliación', details: { requestId, evidence } })
+      if (recorded.error) throw new Error('BILLING_DB_SEPA')
+    }
     const mandates = await this.mollie.list<MollieMandate>(path, 'mandates')
     const mandate = mandates.find(row => row.mandateReference === reference && row.method === 'directdebit' && ['valid','pending'].includes(row.status))
-      ?? await this.mollie.request<MollieMandate>('POST', path, { method: 'directdebit', consumerName: sepa.accountHolder.trim(), consumerAccount: iban, signatureDate: dateOnly(now()), mandateReference: reference }, `tickit:mandate:${requestId}`)
-    if (sub.mandateId !== mandate.id) await this.mollie.request('PATCH', `/customers/${sub.customerId}/subscriptions/${sub.id}`, { mandateId: mandate.id }, `tickit:mandate:${requestId}:subscription`)
+      ?? await this.mollie.request<MollieMandate>('POST', path, { method: 'directdebit', consumerName: sepa.accountHolder.trim(), consumerAccount: iban, signatureDate: (saved ?? evidence).acceptedAt.slice(0, 10), mandateReference: reference }, `tickit:mandate:${tenantId}:${requestId}`)
+    if (sub.mandateId !== mandate.id) await this.mollie.request('PATCH', `/customers/${sub.customerId}/subscriptions/${sub.id}`, { mandateId: mandate.id }, `tickit:mandate:${tenantId}:${requestId}:subscription`)
     for (const old of mandates) {
-      if (old.id !== mandate.id && old.method === 'directdebit' && ['valid','pending'].includes(old.status)) await this.mollie.request('DELETE', `${path}/${old.id}`, undefined, `tickit:mandate:${requestId}:revoke:${old.id}`)
+      if (old.id !== mandate.id && old.method === 'directdebit' && ['valid','pending'].includes(old.status)) await this.mollie.request('DELETE', `${path}/${old.id}`, undefined, `tickit:mandate:${tenantId}:${requestId}:revoke:${old.id}`)
     }
-    const audit = await this.db.from('billing_audit').insert({ tenant_id: tenantId, action: 'mandate', reason: 'Cambio de IBAN de domiciliación', details: { mandateId: mandate.id } })
+    const audit = await this.db.from('billing_audit').insert({ tenant_id: tenantId, actor_id: actorId, action: 'mandate', reason: 'Cambio de IBAN de domiciliación', details: { mandateId: mandate.id, reference, requestId } })
     if (audit.error) throw new Error('BILLING_DB_AUDIT')
     return { mandateId: mandate.id, last4: iban.slice(-4) }
   }
@@ -627,10 +662,11 @@ export class BillingService {
     // The card paid the first period; renewals use the SEPA mandate created at signup.
     const mandates = await this.mollie.list<MollieMandate>(`/customers/${account.stripe_customer_id}/mandates`, 'mandates')
     const sepa = mandates.find(row => row.id === op.result?.mandateId && ['valid','pending'].includes(row.status))
+    if (!sepa || sepa.method !== 'directdebit') throw new Error('BILLING_SEPA_REQUIRED')
     return this.mollie.request<MollieSubscription>('POST', `/customers/${account.stripe_customer_id}/subscriptions`, {
       amount: money(grossCents(contract.recurringCents)), interval: mollieInterval(contract.interval),
       startDate: dateOnly(addMonths(epoch(first.paidAt), months(contract.interval))),
-      description: `Tickit ${contract.planName} (${op.id.slice(0, 8)})`, mandateId: sepa?.id ?? first.mandateId ?? undefined, webhookUrl: this.webhookUrl,
+      description: `Tickit ${contract.planName} (${op.id.slice(0, 8)})`, mandateId: sepa.id, webhookUrl: this.webhookUrl,
       metadata: { tickit_tenant_id: account.tenant_id, tickit_operation_id: op.id },
     }, `tickit:${op.id}:subscription`)
   }
@@ -699,6 +735,7 @@ export class BillingService {
       if (alive.length > 1) throw new Error('BILLING_MULTIPLE_SUBSCRIPTIONS')
       const sub = alive[0] ?? subs.find(row => row.id === account.stripe_subscription_id) ?? null
       let status = account.status, periodEnd = account.period_end, cancelAtPeriodEnd = false
+      let noticeReview = false
       if (sub) {
         const cancellations = sub.status === 'canceled' ? await this.db.from('billing_operations').select('stripe_params').eq('tenant_id', tenantId).eq('kind', 'cancel_now').eq('status', 'completed').returns<Pick<Operation, 'stripe_params'>[]>() : { data: [], error: null }
         if (cancellations.error) throw new Error('BILLING_DB_OPERATION')
@@ -745,7 +782,21 @@ export class BillingService {
               : scheduled ? scheduledContract(scheduled, next) ?? (financial ?? contract ?? account.billed_contract ?? account.contract)
               : contract ?? account.billed_contract ?? account.contract
             if (charged && mollieInterval(charged.interval) === sub.interval && grossCents(charged.recurringCents) !== cents(sub.amount)) {
-              await this.mollie.request('PATCH', `/customers/${customerId}/subscriptions/${sub.id}`, { amount: money(grossCents(charged.recurringCents)) }, `tickit:amount:${sub.id}:${charged.recurringCents}:${next}`)
+              const days = await this.sepaDaysForMandate(tenantId, customerId, sub.mandateId)
+              if (noticeWindowOpen(sub.nextPaymentDate, new Date(), days)) {
+                await this.mollie.request('PATCH', `/customers/${customerId}/subscriptions/${sub.id}`, { amount: money(grossCents(charged.recurringCents)) }, `tickit:amount:${sub.id}:${charged.recurringCents}:${next}`)
+                sub.amount = money(grossCents(charged.recurringCents))
+              } else {
+                // An upgrade card checkout may be paid after the notice deadline.
+                // Preserve paid access, never silently debit the unannounced amount.
+                noticeReview = true
+                const priorReview = await this.db.from('billing_audit').select('id').eq('tenant_id', tenantId).eq('action', 'sepa_review').eq('details->>dueDate', sub.nextPaymentDate).eq('details->>amountCents', String(grossCents(charged.recurringCents))).eq('details->>reference', sub.mandateId ?? 'SEPA').limit(1)
+                if (priorReview.error) console.error(JSON.stringify({ event: 'billing_sepa_notice', status: 'recording_failed' }))
+                else if (!priorReview.data?.length) {
+                  const review = await this.db.from('billing_audit').insert({ tenant_id: tenantId, action: 'sepa_review', reason: 'Cambio de cuota pendiente de coordinación del preaviso SEPA', details: { status: 'change_requires_notice', dueDate: sub.nextPaymentDate, amountCents: grossCents(charged.recurringCents), reference: sub.mandateId ?? 'SEPA', recipient: account.email ?? '' } })
+                  if (review.error) console.error(JSON.stringify({ event: 'billing_sepa_notice', status: 'recording_failed' }))
+                }
+              }
             }
           }
         }
@@ -753,15 +804,46 @@ export class BillingService {
       }
       // Inside the sync claim so a webhook and the cron never issue the same Odoo document twice; never throws.
       if (this.odoo) odooSyncDiagnostic(await syncOdoo({ odoo: this.odoo, db: this.db, account, payments, mode: this.mollie.mode }))
+      // Email errors never revoke paid access or turn a bank-pending debit into debt.
+      let sepaWarning: string | null = null
+      if (this.sepaNotices && sub?.status === 'active' && sub.nextPaymentDate) {
+        try { sepaWarning = await this.preNotifySepa(account, sub) } catch { sepaWarning = 'recording_failed' }
+        if (sepaWarning) console.error(JSON.stringify({ event: 'billing_sepa_notice', status: sepaWarning }))
+      }
+      if (noticeReview) { sepaWarning = 'change_requires_notice'; console.error(JSON.stringify({ event: 'billing_sepa_notice', status: sepaWarning })) }
       // Card or SEPA charges that are accepted keep access; the paid snapshot moves only once settled.
       await this.transition('sync_commit', { tenantId, token, customerId, subscriptionId: sub?.id ?? account.stripe_subscription_id, status, contract, clearSchedule,
         financialContract: financial ?? contract, sepaAuthorization: null, payer: null,
         paymentStatus, periodEnd, cancelAtPeriodEnd, completedOperationId: completed, discrepancy: null })
-      return { reconciled: true, discrepancy: null }
+      return { reconciled: true, discrepancy: null, ...(sepaWarning ? { sepaWarning } : {}) }
     } catch (error) {
       await this.transition('sync_fail', { tenantId, token })
       throw error
     }
+  }
+  async preNotifySepa(account: Account, sub: MollieSubscription) {
+    if (!this.sepaNotices || !sub.nextPaymentDate) return null
+    if (!sub.mandateId) return 'mandate_missing'
+    const mandate = await this.mollie.request<MollieMandate>('GET', `/customers/${sub.customerId}/mandates/${sub.mandateId}`)
+    if (mandate.method !== 'directdebit' || !mandate.mandateReference || !['valid','pending'].includes(mandate.status)) return 'mandate_missing'
+    const recipient = account.email?.trim() ?? ''
+    const amountCents = cents(sub.amount)
+    const identity = JSON.stringify([account.tenant_id, sub.id, mandate.id, mandate.mandateReference, sub.nextPaymentDate, amountCents, recipient])
+    const key = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity)))].map(byte => byte.toString(16).padStart(2, '0')).join('')
+    return notifySepa(this.db, { key, tenantId: account.tenant_id, subscriptionId: sub.id, mandateId: mandate.id, recipient, amountCents, dueDate: sub.nextPaymentDate, reference: mandate.mandateReference, ibanLast4: mandate.details?.consumerAccount?.slice(-4) ?? null, preNotificationDays: await this.sepaDaysForMandate(account.tenant_id, sub.customerId, mandate.id, mandate.mandateReference) }, this.sepaNotices)
+  }
+  async sepaDaysForMandate(tenantId: string, customerId: string, mandateId: string | null | undefined, knownReference?: string): Promise<3 | 14> {
+    if (!mandateId) return 14
+    const reference = knownReference ?? (await this.mollie.request<MollieMandate>('GET', `/customers/${customerId}/mandates/${mandateId}`)).mandateReference
+    if (!reference) return 14
+    const [changed, initial] = await Promise.all([
+      this.db.from('billing_audit').select('details').eq('tenant_id', tenantId).eq('action', 'sepa_authorization').order('created_at', { ascending: false }).limit(100).returns<{ details: { evidence?: SepaEvidence } }[]>(),
+      this.db.rpc('billing_legal_receipts', { p_tenant_id: tenantId, p_data: {} }),
+    ])
+    if (changed.error || initial.error) throw new Error('BILLING_DB_SEPA')
+    const receipts: BillingLegalReceipt[] = initial.data ?? []
+    const evidence = changed.data?.find(row => row.details.evidence?.reference === reference)?.details.evidence ?? receipts.find(row => row.receipt.sepa?.reference === reference)?.receipt.sepa
+    return evidence?.accepted === true && evidence.preNotificationDays === 3 ? 3 : 14
   }
   invoiceDocument(tenantId: string, paymentId: string, document: 'main' | 'refund') {
     return odooDocument({ odoo: this.odoo, db: this.db, tenantId, paymentId, document })

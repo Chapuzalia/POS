@@ -60,6 +60,7 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     '../../lib/format': { parseMoneyToCents },
     './presentation': presentation,
     './SepaMandateFields': { SepaMandateFields: 'sepa-fields' },
+    './BillingSepaRecords': { BillingSepaRecords: 'sepa-records' },
     './BillingProfileFields': { BillingProfileFields: 'billing-profile-fields' },
     '../../../supabase/functions/_shared/billing/profile': billingProfile,
     './sepa': sepaFields,

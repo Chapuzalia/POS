@@ -2,6 +2,7 @@ import { addMonths } from '../../supabase/functions/_shared/billing/promotions.t
 import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie.ts'
 import { BillingService } from '../../supabase/functions/_shared/billing/service.ts'
 import { billingLegalVersion } from '../../supabase/functions/_shared/billing/legal.ts'
+import { sepaAuthorizationVersion } from '../../supabase/functions/_shared/billing/sepa.ts'
 import { createBillingDb, billingIds as ids } from './billing-db.mjs'
 
 // Supabase query surface backed by real PostgreSQL, not a stub of business logic.
@@ -18,7 +19,7 @@ export function billingClient(db) {
       const bind=value=>{args.push(value!==null&&typeof value==='object'?JSON.stringify(value):value);return `$${args.length}`}
       const query={
         select(value='*'){columns=value;return this},
-        eq(key,value){filters.push(`${identifier(key)}=${bind(value)}`);return this},
+        eq(key,value){const [column,field]=key.split('->>');filters.push(`${identifier(column)}${field?`->>${bind(field)}::text`:''}=${bind(value)}`);return this},
         in(key,values){filters.push(`${identifier(key)} in (${values.map(bind).join(',')})`);return this},
         gte(key,value){filters.push(`${identifier(key)}>=${bind(value)}`);return this},
         not(key,operation,value){if(operation!=='is'||value!==null)throw new Error('unsupported');filters.push(`${identifier(key)} is not null`);return this},
@@ -127,14 +128,14 @@ export class FakeMollie {
     return payment
   }
 }
-export const sepa={accountHolder:'Restaurante Prueba SL',iban:'ES91 2100 0418 4502 0005 1332'}
+export const sepa={accountHolder:'Restaurante Prueba SL',iban:'ES91 2100 0418 4502 0005 1332',authorization:{version:sepaAuthorizationVersion,accepted:true}}
 export const legal={version:billingLegalVersion,terms:true,dpa:true,businessRepresentative:true}
 export const payer={legalName:'Restaurante Prueba SL',taxId:'B12345678',email:'billing@example.test',address:{street:'Calle Mayor 1',postalCode:'28001',city:'Madrid',province:'Madrid',countryCode:'ES'}}
-export async function createBillingService(t,baseAmountCents=10000,{odoo=null}={}) {
+export async function createBillingService(t,baseAmountCents=10000,{odoo=null,sepaNotices}={}) {
   const {db,transition}=await createBillingDb(t)
   const base=await transition('catalog_save',{actorId:ids.owner,product:{key:'base',kind:'plan',name:'Synthetic base',description:'',scope:'tenant',featureKey:null,resource:null,active:true,sortOrder:0},version:{interval:'month',amountCents:baseAmountCents,features:['restaurant'],limits:{venues:3,devices:5},included:{},maximum:null,requires:[]},reason:'Test fixture'})
   const production=await transition('catalog_save',{actorId:ids.owner,product:{key:'production',kind:'addon',name:'Production',description:'',scope:'venue',featureKey:'production',resource:null,active:true,sortOrder:1},version:{interval:'month',amountCents:1000,features:[],limits:{venues:1,devices:0},included:{},maximum:10,requires:['restaurant']},reason:'Test fixture'})
-  const mollie=new FakeMollie(),service=new BillingService(billingClient(db),mollie,'http://localhost:5173','https://hooks.example.test/billing-webhook',odoo)
+  const mollie=new FakeMollie(),service=new BillingService(billingClient(db),mollie,'http://localhost:5173','https://hooks.example.test/billing-webhook',odoo,sepaNotices)
   await service.publish(base.id); await service.publish(production.id)
   const selection={planVersionId:base.id,addons:[]}
   const activate=async()=>{const quote=await service.quote(ids.tenant,ids.owner,selection,null,'Test onboarding');await service.confirm(ids.tenant,ids.owner,quote.id,false,{sepa,payer,legal});mollie.payFirst();await service.reconcile(ids.tenant)}

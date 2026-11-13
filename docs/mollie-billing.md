@@ -25,14 +25,24 @@ Por compatibilidad expand-only, las columnas `stripe_customer_id`, `stripe_subsc
 
 ## Alta: primera cuota con tarjeta, siguientes por SEPA
 
-1. El propietario revisa el plan y rellena razón social, NIF, titular e IBAN y acepta el mandato.
-2. `confirm` crea el cliente Mollie (uno por negocio), crea un mandato `directdebit` por API (`mandateReference = TICKIT-<op>`; el IBAN se valida con mod-97, se envía a Mollie y no se guarda ni se registra) y un pago `sequenceType=first`, `method=creditcard`, que devuelve la URL del Checkout.
+1. El propietario revisa el plan y rellena razón social, NIF, titular e IBAN y acepta el mandato versionado. La casilla autoriza el pago y acuerda expresamente el preaviso de tres días naturales; el texto íntegro queda desplegable. No es consentimiento de privacidad ni aceptación del DPA.
+2. `confirm` conserva la autorización antes de llamar a Mollie, crea el cliente (uno por negocio), un mandato `directdebit` por API (referencia `TKI` + UUID completo sin guiones; se recuperan referencias antiguas cuando corresponda) y un pago `sequenceType=first`, `method=creditcard`, que devuelve la URL del Checkout. El IBAN se valida con mod-97 y se envía a Mollie; solo se guardan su huella y últimos cuatro caracteres, no el IBAN completo.
 3. Cuando el pago está `paid`, la conciliación crea la suscripción: mismo importe, intervalo del contrato, `startDate` = fecha de pago + 1 periodo y `mandateId` = mandato SEPA. Se busca por `metadata.tickit_operation_id` antes de crearla: un pago nunca abre dos suscripciones.
 4. Se proyecta el contrato y se activa el negocio (trigger existente: `active` + `paid`).
 
 Una tarjeta fallida o caducada caduca la operación y el negocio sigue limitado a Mi Plan. «Modificar plan» solo libera un Checkout `open` si Mollie acepta cancelarlo; si no, hay que esperar a que caduque, para no cobrar sin servicio.
 
 ## Cobros SEPA en trámite
+
+### Pre-notificación y prueba del mandato
+
+La conciliación envía mediante Resend el próximo importe y vencimiento conocidos, referencia de mandato, identificador SEPA publicado de Mollie y cuenta enmascarada. Reutiliza `RESEND_WELCOME_API_KEY` y el remitente transaccional existente. Guarda intentos y resultados en el historial privado de facturación; el propietario consulta y descarga la autorización desde Mi plan. Para el alta la evidencia también forma parte del justificante contractual. Los cambios de cuenta quedan vinculados al actor y al identificador de solicitud antes de crear el mandato.
+
+El plazo es **tres días naturales con prueba del acuerdo expreso**; sin esa prueba se conservan **catorce días**, incluidos mandatos anteriores. No se aplica el plazo reducido por cambiar el texto en la web. Se puede avisar antes de D−3. Los nuevos cambios próximos al vencimiento se comprueban antes de mutar pagos. Una ampliación cuyo checkout se pague fuera de plazo conserva el acceso pagado, pero no eleva automáticamente el adeudo no preavisado y requiere coordinar la regularización.
+
+Un fallo o ausencia de correo no cambia la deuda ni el acceso pagado; genera supervisión e historial. Una entrega tardía se marca como tal y debe resolverse operativamente: no convierte el aviso en puntual ni cancela por sí sola un adeudo. Los casos inciertos conservan una clave de idempotencia y no se reenvían ciegamente fuera de su ventana. No se crean suscripciones que pasen silenciosamente a la tarjeta inicial por falta del mandato SEPA válido.
+
+Ver `docs/saas-legal-sepa-review.md` para las diferencias de suspensión, la copia bancaria íntegra y las comprobaciones externas pendientes. La modificación no migra ni reautoriza mandatos anteriores, no envía correos reales y no cambia producción.
 
 Un adeudo aceptado queda `pending` varios días. Mientras tanto **no se corta el acceso**: la cuenta sigue `active`, `last_payment_status='pending'` («Cobro en trámite»), sin `delinquent_since`, y no se aplica restricción ni bajada. Para no apilar riesgo, no se aceptan nuevos cambios de plan hasta que el banco liquide. Solo una devolución o un fallo crean deuda (`past_due`, días de gracia y después restricción). Una baja no anula un adeudo ya aceptado: se sigue cobrando.
 
@@ -134,4 +144,4 @@ Las cuentas sandbox enlazadas a `cus_…` devuelven `BILLING_LEGACY_PROVIDER` y 
 
 ## Pendiente
 
-Prealerta SEPA al cliente antes de cada adeudo (Mollie no la envía), pagar las renovaciones con tarjeta en lugar de SEPA, reactivar una baja programada, cancelar desde Tickit un Checkout de ampliación abierto (caduca solo en Mollie), IVA inverso intracomunitario (Odoo factura todo con el 21 %) y conciliación en Odoo de las liquidaciones y devoluciones de Mollie con el banco.
+Verificar el envío y la cobertura del cron de pre-notificación en el entorno de despliegue, coordinar mandatos/adeudos anteriores sin preaviso acreditado y garantizar acceso a la copia bancaria íntegra durante su conservación. Siguen pendientes pagar las renovaciones con tarjeta en lugar de SEPA, reactivar una baja programada, cancelar desde Tickit un Checkout de ampliación abierto (caduca solo en Mollie), IVA inverso intracomunitario (Odoo factura todo con el 21 %) y conciliación en Odoo de las liquidaciones y devoluciones de Mollie con el banco.

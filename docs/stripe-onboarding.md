@@ -25,7 +25,7 @@ localhost en desarrollo. El subdominio remitente debe estar verificado en Resend
 Las altas Stripe usan la plantilla publicada de Resend
 `23a9523e-2c39-405f-8cf4-99dfa8ba8160`, identificada en `_shared/welcome-email.ts`.
 El servidor envía únicamente destinatario y `template` con las variables
-`OWNER_NAME`, `BUSINESS_NAME`, `USER_EMAIL`, `INITIAL_PASSWORD` y `LOGIN_URL`.
+`OWNER_NAME`, `BUSINESS_NAME`, `USER_EMAIL`, `INITIAL_PASSWORD`, `LOGIN_URL` y `PRIVACY_URL`.
 Son valores escapados para los nodos y atributos HTML de la plantilla; no deben
 reutilizarse como variables del asunto o encabezados, donde aparecerían entidades
 HTML. El asunto actual es fijo. No se envían `html`, `text` ni adjuntos en este flujo.
@@ -36,6 +36,14 @@ debe tener también sus valores predeterminados de remitente, asunto y Reply-to:
 El servidor no los sobrescribe, por lo que pueden editarse en Resend y publicarse.
 Si la plantilla falta, no está publicada o Resend la rechaza, se informa del fallo;
 no se sustituye por otro correo local.
+
+La revisión de privacidad incorpora `PRIVACY_URL`, derivada del mismo origen de
+confianza y del manifiesto legal. El fragmento `welcome-privacy-footer.html`
+contiene la primera capa que debe añadirse a la plantilla publicada. Declarar
+`PRIVACY_URL` como variable string y, para compatibilidad con funciones antiguas,
+darle como fallback la URL pública de privacidad del entorno. Publicar primero
+el documento en esa URL. Esta preparación local no modifica ni publica la
+plantilla externa; requiere la autorización de producción correspondiente.
 
 Por decisión del usuario, las altas manuales conservan su correo actual en código,
 con esos mismos remitente/asunto/Reply-to y el texto de acceso inmediato. Incluye

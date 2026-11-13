@@ -89,15 +89,16 @@ it('changes the direct-debit IBAN for the renewals and revokes the previous mand
   const previous = subscription.mandateId
   const card = mollie.mandates.find(row => row.method === 'creditcard')
   const requestId = '70000000-0000-4000-8000-000000000001'
-  await expect(service.changeMandate(ids.tenant, requestId, { accountHolder: 'Nuevo Titular', iban: 'ES91 2100 0418 4502 0005 1333' })).rejects.toThrow('BILLING_INVALID_IBAN')
-  const result = await service.changeMandate(ids.tenant, requestId, { accountHolder: 'Nuevo Titular', iban: 'DE89 3704 0044 0532 0130 00' })
+  await expect(service.changeMandate(ids.tenant, requestId, { ...sepa, accountHolder: 'Nuevo Titular', iban: 'ES91 2100 0418 4502 0005 1333' }, ids.owner)).rejects.toThrow('BILLING_INVALID_IBAN')
+  const result = await service.changeMandate(ids.tenant, requestId, { ...sepa, accountHolder: 'Nuevo Titular', iban: 'DE89 3704 0044 0532 0130 00' }, ids.owner)
   expect(result.last4).toBe('3000')
   expect(subscription.mandateId).toBe(result.mandateId)
   expect(mollie.mandates.find(row => row.id === previous)?.status).toBe('invalid')
   expect(card?.status).toBe('valid')
   // A repeated click reuses the same mandate.
-  await service.changeMandate(ids.tenant, requestId, { accountHolder: 'Nuevo Titular', iban: 'DE89 3704 0044 0532 0130 00' })
+  await service.changeMandate(ids.tenant, requestId, { ...sepa, accountHolder: 'Nuevo Titular', iban: 'DE89 3704 0044 0532 0130 00' }, ids.owner)
   expect(mollie.mandates.filter(row => row.method === 'directdebit' && row.status === 'valid')).toHaveLength(1)
+  await expect(service.changeMandate(ids.tenant, requestId, { ...sepa, accountHolder: 'Otro titular' }, ids.owner)).rejects.toThrow('BILLING_STALE')
   expect((await service.detail(ids.tenant, false)).paymentMethod).toEqual({ method: 'directdebit', status: 'valid', last4: '3000' })
   const audit = (await db.query("select details from billing_audit where action='mandate'")).rows
   expect(JSON.stringify(audit)).not.toContain('DE89')
@@ -105,5 +106,5 @@ it('changes the direct-debit IBAN for the renewals and revokes the previous mand
   at('2026-12-10T06:00:00Z')
   const renewal = mollie.renew('pending')
   await service.handleWebhook(renewal.id)
-  await expect(service.changeMandate(ids.tenant, '70000000-0000-4000-8000-000000000002', { ...sepa, iban: sepa.iban })).rejects.toThrow('BILLING_PENDING_CHANGE')
+  await expect(service.changeMandate(ids.tenant, '70000000-0000-4000-8000-000000000002', { ...sepa, iban: sepa.iban }, ids.owner)).rejects.toThrow('BILLING_PENDING_CHANGE')
 })
