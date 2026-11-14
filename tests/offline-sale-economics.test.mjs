@@ -59,6 +59,8 @@ function withBrowserStorage(run) {
     crypto: globalThis.crypto,
     location: { pathname: '/' },
     localStorage: {
+      get length() { return values.size },
+      key: index => [...values.keys()][index] ?? null,
       getItem: (key) => values.get(key) ?? null,
       removeItem: (key) => values.delete(key),
       setItem: (key, value) => values.set(key, String(value)),

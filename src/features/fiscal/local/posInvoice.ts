@@ -15,6 +15,7 @@ export type PreparedFiscalInstallation = {
   readonly installation: FiscalInstallation
   readonly preparedAt: number
   readonly preparedMonotonicAt: number
+  readonly localOnly?: boolean
 }
 
 const PREPARED_INSTALLATION_MAX_AGE_MS = 60_000
@@ -68,15 +69,18 @@ function fiscalLines(payload: SaleCreatedPayload) {
 export async function preflightPosInvoice(
   context: TenantContext, cashSession: CashSession, payload: SaleCreatedPayload,
   simplifiedLimitCents = 40000,
+  options: { localOnly?: boolean } = {},
 ): Promise<PreparedFiscalInstallation> {
   const customer = payload.ticket.invoice?.customer
   if (!customer && payload.sale.totalCents > simplifiedLimitCents) {
     throw new Error('Esta venta requiere cliente fiscal y factura completa.')
   }
   fiscalLines(payload)
-  const installation = await preflightFiscalInstallation(context, cashSession)
+  const installation = options.localOnly
+    ? await loadFiscalInstallation(context, cashSession, true, options)
+    : await preflightFiscalInstallation(context, cashSession)
   await assertRestaurantPaymentsReconciled(installation)
-  return preparedFiscalInstallation(context, cashSession, payload.sale.id, installation)
+  return { ...preparedFiscalInstallation(context, cashSession, payload.sale.id, installation), localOnly: options.localOnly }
 }
 
 export async function preflightFiscalInstallation(context: TenantContext, cashSession: CashSession): Promise<FiscalInstallation> {
@@ -100,8 +104,10 @@ export async function issuePosInvoice(
   simplifiedLimitCents = 40000,
   prepared?: PreparedFiscalInstallation | null,
 ): Promise<LocalFiscalEntry> {
+  // Restaurant RPCs still reconcile online; quick sales use the validated local chain.
+  const localOnly = prepared?.localOnly === true && !resolveSale
   const installation = reusablePreparedInstallation(prepared, context, cashSession, payload.sale.id)
-    ?? await loadFiscalInstallation(context, cashSession, true)
+    ?? await loadFiscalInstallation(context, cashSession, true, { localOnly })
   if (!resolveSale) {
     const existing = await findLocalFiscalEntryByTicket(installation, payload.ticket.id)
     if (existing) {
@@ -111,9 +117,9 @@ export async function issuePosInvoice(
       return existing
     }
   }
-  const lease = await getFiscalInstallationLease(installation)
+  const lease = await getFiscalInstallationLease(installation, { localOnly })
   try {
-    await recoverServerConfirmedFiscalChain(installation)
+    if (!localOnly) await recoverServerConfirmedFiscalChain(installation)
   } catch (error) {
     if (!isFiscalTransportUnavailable(error)) throw error
   }

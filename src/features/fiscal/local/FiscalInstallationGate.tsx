@@ -5,8 +5,9 @@ import { AppModal } from '../../../components/ui/AppModal'
 import { Button } from '../../../components/ui/Button'
 import { getReadableError } from '../../../utils/errors'
 import { FiscalIdentityMissingError } from './localIdentity.ts'
-import { activateFiscalInstallation, latestFiscalInstallation, loadFiscalInstallation, fiscalIdentityKey, FiscalActivationConfirmationError } from './installation.ts'
+import { activateFiscalInstallation, latestFiscalInstallation, loadFiscalInstallation, getFiscalInstallationLease, fiscalIdentityKey, FiscalActivationConfirmationError } from './installation.ts'
 import { FISCAL_SETTINGS_CHANGED } from './settings.ts'
+import { preflightFiscalInstallation } from './posInvoice.ts'
 import { loadVerifactuIntegration } from './integration.ts'
 import { resolveLocalFiscalMode } from './tenantMode.ts'
 import { checkFiscalInstallationRevocation, FISCAL_INSTALLATION_REVOKED } from './installationRevocation.ts'
@@ -39,7 +40,10 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
       try {
         const current = scopeRef.current
         if (!current.cashSession) return
+        if (await resolveLocalFiscalMode(current.context.tenantId) === 'disabled') return
         await checkFiscalInstallationRevocation(current.context, current.cashSession, fiscalIdentityKey(current.context, current.cashSession))
+        const installation = await loadFiscalInstallation(current.context, current.cashSession, true)
+        await getFiscalInstallationLease(installation)
       } catch (failure) {
         if (!alive) return
         setReady(false)
@@ -54,6 +58,7 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
     window.addEventListener('focus', refresh)
     window.addEventListener('storage', refresh)
     window.addEventListener(FISCAL_INSTALLATION_REVOKED, refresh)
+    window.addEventListener(FISCAL_SETTINGS_CHANGED, refresh)
     document.addEventListener('visibilitychange', refresh)
     const timer = window.setInterval(refresh, 15000)
     return () => {
@@ -62,6 +67,7 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
       window.removeEventListener('focus', refresh)
       window.removeEventListener('storage', refresh)
       window.removeEventListener(FISCAL_INSTALLATION_REVOKED, refresh)
+      window.removeEventListener(FISCAL_SETTINGS_CHANGED, refresh)
       document.removeEventListener('visibilitychange', refresh)
     }
   }, [ready, context.tenantId, context.venueId, context.deviceId, context.deviceMode, context.userId, cashSession?.id, cashSession?.cashRegisterId])
@@ -98,7 +104,8 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
       try {
         if (await resolveLocalFiscalMode(context.tenantId) === 'disabled') { if (alive) { setReady(true); setBusy(false) }; return }
         if (!alive) return
-        await loadFiscalInstallation(context, cashSession, true)
+        // Restore any server-confirmed tail once before enabling checkout, never on each quick sale.
+        await preflightFiscalInstallation(context, cashSession)
         if (alive) setReady(true)
       } catch (failure) {
         if (!alive) return

@@ -29,7 +29,7 @@ const settings = { tenant_id: tenantId, bridge_url: 'https://bridge.example/', a
   producer_name: 'Productor', producer_nif: 'B12345678', system_id: 'TK', system_version: '1' }
 
 function harness({ offline = true, identity = snapshot, cachedSettings = settings, ledgerError = null, response = null, enabled = true, retiredForVerifactu = false } = {}) {
-  const globals = { navigator: { onLine: !offline }, AbortController, setTimeout, clearTimeout,
+  const globals = { navigator: { onLine: !offline, locks: { request: (_key, _options, work) => work() } }, AbortController, setTimeout, clearTimeout,
     DOMException, TypeError, URL, crypto, performance,
     window: { localStorage: { getItem: () => cachedSettings ? JSON.stringify(cachedSettings) : null, setItem() {} } } }
   const reader = compileComponent(source('backendRead'), {}, globals).readFiscalBackend
@@ -65,6 +65,7 @@ function harness({ offline = true, identity = snapshot, cachedSettings = setting
     './serverRecovery.ts': { recoverServerConfirmedFiscalChain: async () => 0 },
     '../../../utils/UserFacingError.ts': { UserFacingError },
     './localIdentity.ts': { readFiscalIdentity: async () => identity, FiscalIdentityMissingError: class extends Error {},
+      refreshFiscalIdentitySnapshot: async () => {},
       readPendingFiscalActivation: async () => null,
       assertFiscalLedgerHeadValid: async () => { calls.ledger++; if (ledgerError) throw ledgerError } },
   }, globals)

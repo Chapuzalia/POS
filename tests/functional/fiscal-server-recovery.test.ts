@@ -58,6 +58,7 @@ function row(position: number) {
 let serverRows: ReturnType<typeof row>[]
 let pages: URLSearchParams[]
 const pageError = vi.fn()
+const headRpcError = vi.fn()
 const dispatchEvent = vi.fn()
 const timeout = { code: '57014', message: 'canceling statement due to statement timeout', details: null, hint: null }
 
@@ -69,11 +70,18 @@ beforeEach(() => {
   serverRows = Array.from({ length: 123 }, (_, i) => row(i + 1))
   pages = []
   pageError.mockReset()
+  headRpcError.mockReset()
   readHead.mockResolvedValue({ entry: null })
   readRecord.mockResolvedValue(null)
   reconcile.mockImplementation(async (_scope, _device, copies) => copies.length)
   httpFetch.mockImplementation(async (input: string) => {
-    const query = new URL(input).searchParams
+    const url = new URL(input)
+    const query = url.searchParams
+    if (url.pathname.endsWith('/rpc/pos_fiscal_chain_head')) {
+      const error = headRpcError()
+      return error ? Response.json(error, { status: error.code === 'PGRST202' ? 404 : error.code === 'PGRST116' ? 406 : 403 })
+        : Response.json(serverRows.length ? [serverRows.at(-1)] : [])
+    }
     if (query.get('order') === 'chain_position.desc') {
       return Response.json(serverRows.at(-1) ?? null)
     }
@@ -109,6 +117,59 @@ it('downloads complete snapshots in small scoped batches without OFFSET', async 
   expect(copies.map(copy => copy.entry.record.chainPosition)).toEqual(serverRows.map(record => record.chain_position))
   expect(copies[0].entry.record.hash).toBe(serverRows[0].hash)
   expect(copies[0].entry.invoice.totalCents).toBe(100)
+  const [url, init] = httpFetch.mock.calls[0]
+  expect(new URL(url).pathname).toBe('/rest/v1/rpc/pos_fiscal_chain_head')
+  expect(JSON.parse(init.body)).toEqual({ p_tenant_id: installation.tenantId,
+    p_fiscal_subject_id: installation.fiscalSubjectId, p_installation_id: installation.installationId })
+})
+
+it.each(['PGRST202', '42883'])('falls back to the scoped table read only when the new RPC is missing (%s)', async code => {
+  headRpcError.mockReturnValue({ code, message: 'function missing', details: '', hint: '' })
+  await expect(recoverServerConfirmedFiscalChain(installation)).resolves.toBe(123)
+  const url = new URL(httpFetch.mock.calls[1][0])
+  expect(url.pathname).toBe('/rest/v1/fiscal_local_records')
+  expect(url.searchParams.get('tenant_id')).toBe(`eq.${installation.tenantId}`)
+  expect(url.searchParams.get('fiscal_subject_id')).toBe(`eq.${installation.fiscalSubjectId}`)
+  expect(url.searchParams.get('installation_id')).toBe(`eq.${installation.installationId}`)
+  expect(url.searchParams.get('order')).toBe('chain_position.desc')
+  expect(url.searchParams.get('limit')).toBe('1')
+})
+
+it.each(['42501', 'PGRST301', '57014'])('propagates head RPC errors without retrying through the table (%s)', async code => {
+  headRpcError.mockReturnValue({ code, message: 'read denied or timed out', details: '', hint: '' })
+  await expect(recoverServerConfirmedFiscalChain(installation)).rejects.toMatchObject({ code })
+  expect(httpFetch).toHaveBeenCalledOnce()
+  expect(reconcile).not.toHaveBeenCalled()
+})
+
+it('keeps an empty head empty without falling back to a second read', async () => {
+  serverRows = []
+  await expect(recoverServerConfirmedFiscalChain(installation)).resolves.toBe(0)
+  expect(httpFetch).toHaveBeenCalledOnce()
+  expect(reconcile).not.toHaveBeenCalled()
+})
+
+it('rejects ambiguous head responses without falling back to another read', async () => {
+  headRpcError.mockReturnValue({ code: 'PGRST116', message: 'Cannot coerce the result to a single JSON object',
+    details: 'The result contains 2 rows', hint: null })
+  await expect(recoverServerConfirmedFiscalChain(installation)).rejects.toMatchObject({ code: 'PGRST116' })
+  expect(httpFetch).toHaveBeenCalledOnce()
+  expect(reconcile).not.toHaveBeenCalled()
+})
+
+it('does not fall back to the table after a head transport failure', async () => {
+  headRpcError.mockImplementation(() => { throw new TypeError('Network request failed') })
+  await expect(recoverServerConfirmedFiscalChain(installation)).rejects.toMatchObject({ code: '' })
+  expect(pages).toHaveLength(0)
+  expect(reconcile).not.toHaveBeenCalled()
+  expect(httpFetch.mock.calls.every(([url]) => new URL(url).pathname.endsWith('/rpc/pos_fiscal_chain_head'))).toBe(true)
+})
+
+it('shares the head read and reconciliation between concurrent recoveries', async () => {
+  await expect(Promise.all([recoverServerConfirmedFiscalChain(installation), recoverServerConfirmedFiscalChain(installation)]))
+    .resolves.toEqual([123, 123])
+  expect(httpFetch.mock.calls.filter(([url]) => new URL(url).pathname.endsWith('/rpc/pos_fiscal_chain_head'))).toHaveLength(1)
+  expect(reconcile).toHaveBeenCalledOnce()
 })
 
 it('reduces a timed-out batch and retries at the same position', async () => {

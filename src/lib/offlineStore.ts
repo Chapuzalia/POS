@@ -85,6 +85,49 @@ function writeJson<T>(key: string, value: T) {
   }
 }
 
+// Keep the old array as a readable baseline for installed PWAs. New writes store
+// individual rows (or deletion markers), so one payment never serializes its history.
+function recordKeys(key: string): string[] {
+  const keys: string[] = []
+  if (!hasStorage()) return keys
+  const prefix = `${key}:record:v1:`
+  for (let index = 0; index < window.localStorage.length; index++) {
+    const storedKey = window.localStorage.key(index)
+    if (storedKey?.startsWith(prefix)) keys.push(storedKey)
+  }
+  return keys
+}
+
+function readRecords<T extends { id: string }>(key: string): T[] {
+  const records = new Map(readJson<T[]>(key, []).map(record => [record.id, record]))
+  const prefix = `${key}:record:v1:`
+  for (const rowKey of recordKeys(key)) {
+    const id = decodeURIComponent(rowKey.slice(prefix.length))
+    const row = readJson<T | null | undefined>(rowKey, undefined)
+    if (row) records.set(id, row)
+    else if (row === null) records.delete(id)
+  }
+  return [...records.values()]
+}
+
+function writeRecords<T extends { id: string }>(key: string, records: T[], previous: T[] = readRecords<T>(key)): void {
+  const before = new Map(previous.map(record => [record.id, record]))
+  for (const record of records) {
+    const prior = before.get(record.id)
+    if (prior !== record && (!prior || JSON.stringify(prior) !== JSON.stringify(record))) {
+      writeJson(`${key}:record:v1:${encodeURIComponent(record.id)}`, record)
+    }
+    before.delete(record.id)
+  }
+  for (const id of before.keys()) writeJson(`${key}:record:v1:${encodeURIComponent(id)}`, null)
+}
+
+function clearRecords(key: string): void {
+  // Remove the baseline first; interrupted cleanup cannot resurrect deleted baseline rows.
+  removeKey(key)
+  for (const rowKey of recordKeys(key)) removeKey(rowKey)
+}
+
 function removeKey(key: string) {
   if (!hasStorage()) {
     return
@@ -214,15 +257,15 @@ export function saveCachedTicket(context: TenantContext, lines: TicketLine[]) {
 }
 
 export function getSaleLedger(context: TenantContext) {
-  return readJson<SaleRecord[]>(ledgerKey(context), [])
+  return readRecords<SaleRecord>(ledgerKey(context)).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
 
-export function saveSaleLedger(context: TenantContext, records: SaleRecord[]) {
-  writeJson(ledgerKey(context), records)
+export function saveSaleLedger(context: TenantContext, records: SaleRecord[], previous?: SaleRecord[]) {
+  writeRecords(ledgerKey(context), records, previous)
 }
 
 export function clearSaleLedger(context: TenantContext) {
-  removeKey(ledgerKey(context))
+  clearRecords(ledgerKey(context))
 }
 
 export function removeSaleFromLedger(context: TenantContext, saleId: string) {
@@ -230,15 +273,15 @@ export function removeSaleFromLedger(context: TenantContext, saleId: string) {
 }
 
 export function getSessionTickets(context: TenantContext, cashSessionId: string) {
-  return readJson<SessionTicketRecord[]>(sessionTicketsKey(context, cashSessionId), [])
+  return readRecords<SessionTicketRecord>(sessionTicketsKey(context, cashSessionId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
-export function saveSessionTickets(context: TenantContext, cashSessionId: string, tickets: SessionTicketRecord[]) {
-  writeJson(sessionTicketsKey(context, cashSessionId), tickets)
+export function saveSessionTickets(context: TenantContext, cashSessionId: string, tickets: SessionTicketRecord[], previous?: SessionTicketRecord[]) {
+  writeRecords(sessionTicketsKey(context, cashSessionId), tickets, previous)
 }
 
 export function clearSessionTickets(context: TenantContext, cashSessionId: string) {
-  removeKey(sessionTicketsKey(context, cashSessionId))
+  clearRecords(sessionTicketsKey(context, cashSessionId))
 }
 
 export function getOfflineQueue() {
