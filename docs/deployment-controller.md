@@ -55,3 +55,18 @@ El checker de PRs `scripts/check-migrations.mjs`, sus tests y
 El controller mantiene su propia copia independiente del analizador de despliegue.
 Mantener la configuración SPA ya establecida en los frontends de POS; el
 controller genérico conserva el modo de routing de cada aplicación.
+
+## Archivos estáticos y caché del frontend
+
+El `Caddyfile` de la raíz se incorpora al frontend estático de Railpack. Mantiene
+las entradas de POS y CRM, la redirección `/crm` y las rutas del cliente. Los
+archivos de `/assets/` y las rutas con extensión no usan el fallback SPA: si
+faltan, devuelven 404 con `Cache-Control: no-store`. HTML, service worker,
+manifiestos y metadatos de versión tampoco se almacenan en la caché HTTP; los
+assets con hash existentes se sirven con caché inmutable. El worker conserva su
+almacenamiento offline explícito.
+
+Si un despliegue anterior ya dejó HTML cacheado bajo una URL `.js` en Cloudflare,
+el cambio de configuración no invalida esa respuesta existente. Hay que purgar
+las URL afectadas del entorno correspondiente y comprobar que responden con
+JavaScript. No es necesario borrar el almacenamiento local del TPV.
