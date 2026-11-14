@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { MollieGateway } from './mollie.ts'
 import { OdooGateway } from './odoo.ts'
 import { BillingService } from './service.ts'
+import { sepaNoticeSender } from './sepa-notices.ts'
 
 export type BillingSecrets = { mollie_api_key: string | null; odoo_url: string | null; odoo_db: string | null; odoo_api_key: string | null }
 const noSecrets: BillingSecrets = { mollie_api_key: null, odoo_url: null, odoo_db: null, odoo_api_key: null }
@@ -42,7 +43,7 @@ export async function billingServiceFromEnv(db: SupabaseClient, loaded?: Billing
   const secrets = loaded ?? await loadBillingSecrets(db)
   const env = billingEnv(secrets)
   if (!env.configured) throw new Error('BILLING_NOT_CONFIGURED')
-  return new BillingService(db, new MollieGateway(env.mollieKey), env.appUrl, env.webhookUrl, odooFromEnv(secrets))
+  return new BillingService(db, new MollieGateway(env.mollieKey), env.appUrl, env.webhookUrl, odooFromEnv(secrets), sepaNoticeSender({ apiKey: Deno.env.get('RESEND_WELCOME_API_KEY'), appUrl: env.appUrl }))
 }
 
 const hint = (value: string) => `…${value.slice(-4)}`

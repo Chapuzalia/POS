@@ -157,7 +157,7 @@ export function useQuickSalePayment(options: Options) {
     }
     let preparedFiscalInstallation: PreparedFiscalInstallation | null = null
     if (localFiscalProduction) {
-      try { preparedFiscalInstallation = await preflightPosInvoice(context, cashSession, preview) }
+      try { preparedFiscalInstallation = await preflightPosInvoice(context, cashSession, preview, 40000, { localOnly: true }) }
       catch (error) {
         if (operation.state === 'prepared') await discardPreparedPaymentOperation(operation.key)
         fail(error instanceof Error ? error.message : 'La instalación fiscal no está preparada para emitir.')

@@ -22,7 +22,7 @@ export function BillingOfferSummary({ quote, catalog }: { quote: BillingOperatio
     {contract ? <div className="!border-t !border-[var(--crm-border)] !pt-3">
       <p className="!m-0">Después, <strong>{billingMoney(grossCents(contract.recurringCents))} / {contract.interval === 'year' ? 'año' : 'mes'}</strong> <span className="!text-xs !text-[var(--crm-text-muted)]">({billingMoney(contract.recurringCents)} + IVA 21 %)</span></p>
       {contract.addons.some(addon => addon.quantity > 0) ? <p className="!mb-0 !mt-2 !text-xs !text-[var(--crm-text-muted)]">{contract.addons.filter(addon => addon.quantity > 0).map(addon => `${catalog?.products.find(product => product.key === addon.key)?.name ?? addon.key} × ${addon.quantity}`).join(' · ')}</p> : null}
-      <p className="!mb-0 !mt-2 !text-xs !text-[var(--crm-text-muted)]">Renovación automática. Baja para la próxima renovación.</p>
+      <p className="!mb-0 !mt-2 !text-xs !text-[var(--crm-text-muted)]">Renovación automática. Baja ordinaria para la próxima renovación. <a className={linkClass} href="/legal/portabilidad.html" target="_blank" rel="noreferrer">Cambio de proveedor y recuperación de datos conforme a los Términos.</a></p>
     </div> : null}
   </section>
 }

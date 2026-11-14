@@ -25,6 +25,12 @@ function storageKey(tenantId: string): string {
 }
 
 export const FISCAL_SETTINGS_CHANGED = 'tickit:fiscal-settings-changed'
+
+export function readCachedFiscalPosSettings(tenantId: string): FiscalPosSettings {
+  const settings = settingsSchema.parse(JSON.parse(window.localStorage.getItem(storageKey(tenantId)) ?? 'null'))
+  if (settings.tenant_id !== tenantId) throw new Error('El puente fiscal pertenece a otro tenant.')
+  return settings
+}
 const settingsCache = new Map<string, { value: FiscalPosSettings; expiresAt: number }>()
 
 export function rememberFiscalPosSettings(value: unknown, tenantId: string): FiscalPosSettings {

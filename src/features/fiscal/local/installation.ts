@@ -5,12 +5,12 @@ import type { FiscalSystem } from './canonical.ts'
 import { createBridgeClient } from './bridgeClient.ts'
 import { assertFiscalLease, createLocalFallbackLease, type FiscalLease } from './clock.ts'
 import { isFiscalTransportUnavailable } from './availability.ts'
-import { loadFiscalPosSettings, rememberFiscalPosSettings, type FiscalPosSettings } from './settings.ts'
-import { FiscalIdentityMissingError, FiscalInstallationRevokedError, readFiscalIdentity, readPendingFiscalActivation, persistFiscalIdentity, fiscalActivationRequest, assertFiscalLedgerHeadValid, clearFiscalActivationRequest } from './localIdentity.ts'
+import { loadFiscalPosSettings, readCachedFiscalPosSettings, rememberFiscalPosSettings, type FiscalPosSettings } from './settings.ts'
+import { FiscalIdentityMissingError, FiscalInstallationRevokedError, readFiscalIdentity, readPendingFiscalActivation, persistFiscalIdentity, refreshFiscalIdentitySnapshot, fiscalActivationRequest, assertFiscalLedgerHeadValid, clearFiscalActivationRequest } from './localIdentity.ts'
 import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
 import { UserFacingError } from '../../../utils/UserFacingError.ts'
 import { readFiscalBackend } from './backendRead.ts'
-import { loadVerifactuIntegration } from './integration.ts'
+import { loadVerifactuIntegration, readCachedVerifactuIntegration, type VerifactuIntegration } from './integration.ts'
 import { assertFiscalInstallationNotRevoked, refreshFiscalInstallationRevocation } from './installationRevocation.ts'
 
 export class FiscalActivationConfirmationError extends UserFacingError {}
@@ -55,7 +55,18 @@ export function fiscalIdentityKey(context: TenantContext, cashSession: Pick<Cash
 }
 
 const installationLoads = new Map<string, Promise<FiscalInstallation>>()
-export async function loadFiscalInstallation(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, requireBridgeIdentity = false): Promise<FiscalInstallation> {
+export async function loadFiscalInstallation(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, requireBridgeIdentity = false, options: { localOnly?: boolean } = {}): Promise<FiscalInstallation> {
+  if (options.localOnly) {
+    const key = fiscalIdentityKey(context, cashSession)
+    const snapshot = snapshotSchema.parse(await readRequiredIdentity(key))
+    assertSnapshotScope(context, cashSession, snapshot)
+    await assertFiscalInstallationNotRevoked(snapshot.installation.id)
+    if (await readPendingFiscalActivation(key)) throw new FiscalIdentityMissingError()
+    await assertInstallationLedgerValid(context, snapshot)
+    const installation = await installationFromSnapshot(context, cashSession, snapshot,
+      readCachedFiscalPosSettings(context.tenantId), readCachedVerifactuIntegration(context.tenantId))
+    return requireEmissionIdentity(installation, requireBridgeIdentity)
+  }
   const key = fiscalIdentityKey(context, cashSession) + ':' + context.userId
   const current = installationLoads.get(key)
   if (current) return requireEmissionIdentity(await current, requireBridgeIdentity)
@@ -89,12 +100,11 @@ async function fetchFiscalInstallation(context: TenantContext, cashSession: Pick
       }
       const value = response.data as { installation: unknown; subject: unknown; settings: unknown; head: unknown }
       const snapshot = snapshotSchema.parse(value)
-      if (snapshot.installation.tenant_id !== context.tenantId || snapshot.installation.venue_id !== context.venueId
-        || snapshot.installation.device_id !== context.deviceId || snapshot.installation.cash_register_id !== cashSession.cashRegisterId
-        || snapshot.subject.id !== snapshot.installation.fiscal_subject_id || snapshot.subject.tenant_id !== context.tenantId) throw new Error('La instalación fiscal no pertenece a esta caja y dispositivo.')
+      assertSnapshotScope(context, cashSession, snapshot)
       const settings = rememberFiscalPosSettings(value.settings, context.tenantId)
-      await assertFiscalLedgerHeadValid(`${context.tenantId}:${snapshot.installation.fiscal_subject_id}:${snapshot.installation.id}`, context.deviceId, snapshot.installation.series_version === 1, snapshot.installation.installation_number)
+      await assertInstallationLedgerValid(context, snapshot)
       const installation = await installationFromSnapshot(context, cashSession, snapshot, settings)
+      await refreshFiscalIdentitySnapshot(key, snapshot.installation.id, snapshot)
       installation.preparedServerHead = { record: value.head }
       return installation
     }
@@ -103,15 +113,30 @@ async function fetchFiscalInstallation(context: TenantContext, cashSession: Pick
   const [snapshot, settings] = await Promise.all([
     fetchFiscalSnapshot(context, cashSession, cached.installation.id, cached),
     loadFiscalPosSettings(context.tenantId),
-    assertFiscalLedgerHeadValid(`${context.tenantId}:${cached.installation.fiscal_subject_id}:${cached.installation.id}`,
-      context.deviceId, cached.installation.series_version === 1, cached.installation.installation_number),
+    assertInstallationLedgerValid(context, cached),
   ])
   const installation = await installationFromSnapshot(context, cashSession, snapshot, settings)
+  await refreshFiscalIdentitySnapshot(key, snapshot.installation.id, snapshot)
   return installation
 }
 
 const snapshotSchema = z.object({ installation: installationSchema, subject: subjectSchema })
 type Snapshot = z.infer<typeof snapshotSchema>
+
+function assertSnapshotScope(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, snapshot: Snapshot): void {
+  if (snapshot.installation.tenant_id !== context.tenantId || snapshot.installation.venue_id !== context.venueId
+    || snapshot.installation.device_id !== context.deviceId || snapshot.installation.cash_register_id !== cashSession.cashRegisterId
+    || snapshot.subject.id !== snapshot.installation.fiscal_subject_id || snapshot.subject.tenant_id !== context.tenantId) {
+    throw new Error('La instalación fiscal no pertenece a esta caja y dispositivo.')
+  }
+}
+
+async function assertInstallationLedgerValid(context: TenantContext, snapshot: Snapshot): Promise<void> {
+  const scope = `${context.tenantId}:${snapshot.installation.fiscal_subject_id}:${snapshot.installation.id}`
+  if (!navigator.locks?.request) throw new Error('Web Locks no está disponible. Se bloquea la emisión fiscal.')
+  await navigator.locks.request(`tickit-fiscal:${scope}`, { mode: 'exclusive' }, () =>
+    assertFiscalLedgerHeadValid(scope, context.deviceId, snapshot.installation.series_version === 1, snapshot.installation.installation_number))
+}
 
 async function requirePendingBridgeReplacement(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, cached: Snapshot): Promise<void> {
   const installation = cached.installation
@@ -174,9 +199,9 @@ async function fetchFiscalSnapshot(context: TenantContext, cashSession: Pick<Cas
 }
 
 async function installationFromSnapshot(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, { installation, subject }: Snapshot,
-  settings?: FiscalPosSettings): Promise<FiscalInstallation> {
+  settings?: FiscalPosSettings, integration?: VerifactuIntegration): Promise<FiscalInstallation> {
   settings ??= await loadFiscalPosSettings(context.tenantId)
-  const integration = await loadVerifactuIntegration(context.tenantId)
+  integration ??= await loadVerifactuIntegration(context.tenantId)
   const enabled = Boolean(integration.enabled_at)
   bridgeRequired.set(context.tenantId, enabled)
   bridgeUrls.set(context.tenantId, enabled ? settings.bridge_url || null : null)
@@ -259,7 +284,7 @@ export async function fiscalBridgeAccessToken(): Promise<string> {
   return data.session.access_token
 }
 
-export async function getFiscalInstallationLease(installation: FiscalInstallation): Promise<FiscalLease> {
+export async function getFiscalInstallationLease(installation: FiscalInstallation, options: { localOnly?: boolean } = {}): Promise<FiscalLease> {
   await assertFiscalInstallationNotRevoked(installation.installationId)
   if (!installation.bridgeUrl || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
     return createLocalFallbackLease(installation.installationId, installation.deviceId)
@@ -272,6 +297,7 @@ export async function getFiscalInstallationLease(installation: FiscalInstallatio
       return existing
     } catch { leases.delete(leaseKey) }
   }
+  if (options.localOnly) return createLocalFallbackLease(installation.installationId, installation.deviceId)
   try {
     const client = createBridgeClient({ mode: 'production', baseUrl: installation.bridgeUrl, getAccessToken: fiscalBridgeAccessToken })
     const lease = { ...await client.acquireInstallationLease(installation.installationId, installation.deviceId), source: 'bridge' as const }

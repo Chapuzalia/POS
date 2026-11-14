@@ -1,11 +1,12 @@
 import { expect, it, vi } from 'vitest'
 import { sendWelcomeEmail } from '../../supabase/functions/_shared/welcome-email'
 import { readFileSync } from 'node:fs'
+import { billingLegalDocuments } from '../../supabase/functions/_shared/billing/legal'
 
 const input = { ownerId: 'owner-fixture', ownerEmail: 'owner@example.test', ownerPassword: ' A&<"234 ', ownerFullName: 'Ana <img src=x onerror=alert(1)>', tenantName: 'Café & Bar', billingMode: 'stripe' as const }
 const config = { apiKey: 're_fixture_secret', appUrl: 'https://crm.example.test/base?secret=discard#fragment' }
 
-it('uses the published Stripe template with the five escaped HTML variables and a trusted CRM link', async () => {
+it('uses the published template with escaped HTML variables and trusted CRM and privacy links', async () => {
   const calls: Array<{ url: string; init: RequestInit }> = []
   const status = await sendWelcomeEmail(input, config, async (url, init = {}) => {
     calls.push({ url: String(url), init })
@@ -27,6 +28,7 @@ it('uses the published Stripe template with the five escaped HTML variables and 
         USER_EMAIL: input.ownerEmail,
         INITIAL_PASSWORD: ' A&amp;&lt;&quot;234 ',
         LOGIN_URL: 'https://crm.example.test/crm',
+        PRIVACY_URL: `https://crm.example.test${billingLegalDocuments.privacy.url}`,
       },
     },
   })
@@ -52,6 +54,10 @@ it('preserves the manual welcome sender, reply address, logo, credentials and CR
   expect(body.html).toContain(' A&amp;&lt;&quot;234 ')
   expect(body.html).toContain('&lt;img src=x onerror=alert(1)&gt;')
   expect(body.html).not.toContain('<img src=x')
+  const privacyUrl = `https://crm.example.test${billingLegalDocuments.privacy.url}`
+  expect(body.text).toContain(privacyUrl)
+  expect(body.html).toContain(`href="${privacyUrl}"`)
+  expect(body.html).not.toContain('secret=discard')
   expect(body.html.match(/<img /g)).toHaveLength(1)
   expect(body.html).toContain('src="cid:tickit-welcome-logo"')
   expect(body.html).toContain('alt="Tickit"')

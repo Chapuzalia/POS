@@ -183,6 +183,6 @@ export function CrmSectionContent({
     case 'plan':
       return <PlanCrm disabled={disabled} tenantContext={context} />
     case 'documentation':
-      return <DocumentationCrm canStartOnboarding={!disabled && Boolean(selectedVenue && getOnboardingTopics(context, selectedVenue).length)} onStartOnboarding={onStartOnboarding} />
+      return <DocumentationCrm canStartOnboarding={!disabled && Boolean(selectedVenue && getOnboardingTopics(context, selectedVenue).length)} onStartOnboarding={onStartOnboarding} tenantContext={context} />
   }
 }

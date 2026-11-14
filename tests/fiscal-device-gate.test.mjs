@@ -9,7 +9,7 @@ const context = mode => ({ tenantId: 'tenant', venueId: 'venue', deviceId: 'devi
 const cashSession = { id: 'cash', cashRegisterId: 'register' }
 class MissingIdentity extends Error {}
 
-function gate(mode, failure, revocation = { active: false }) {
+function gate(mode, failure, revocation = { active: false }, fiscalMode = 'production') {
   const calls = []
   const busy = []
   const window = new EventTarget()
@@ -23,15 +23,17 @@ function gate(mode, failure, revocation = { active: false }) {
     '../../../components/ui/Button': { Button: 'button' },
     '../../../utils/errors': { getReadableError: error => error.message },
     './localIdentity.ts': { FiscalIdentityMissingError: MissingIdentity },
+    './posInvoice.ts': { preflightFiscalInstallation: async () => { calls.push('load'); if (failure) throw failure } },
     './installation.ts': {
       loadFiscalInstallation: async () => { calls.push('load'); if (failure) throw failure },
+      getFiscalInstallationLease: async () => {},
       latestFiscalInstallation: async () => { calls.push('preview'); return null },
       activateFiscalInstallation: async () => { calls.push('activate') },
       FiscalActivationConfirmationError: class extends Error {},
       fiscalIdentityKey: () => 'identity-key',
     },
     './installationRevocation.ts': { FISCAL_INSTALLATION_REVOKED: 'installation-revoked', checkFiscalInstallationRevocation: async () => { if (revocation.active) throw Object.assign(new MissingIdentity(), { installationRevoked: true }) } },
-    './tenantMode.ts': { resolveLocalFiscalMode: () => { calls.push('mode'); return Promise.resolve('production') } },
+    './tenantMode.ts': { resolveLocalFiscalMode: () => { calls.push('mode'); return Promise.resolve(fiscalMode) } },
     './integration.ts': { loadVerifactuIntegration: async () => { calls.push('settings'); return { aeat_environment: 'production' } } },
     './settings.ts': {
       FISCAL_SETTINGS_CHANGED: 'fiscal-settings-changed',
@@ -78,5 +80,16 @@ test('a running checkout detects revocation without reloading and permits only a
   assert.ok(nodes(tree).some(node => typeof node.props?.children === 'string' && node.props.children.includes('revocada desde el bridge')))
   assert.ok(nodes(tree).some(node => node.props?.children === 'Crear nueva instalación' && !node.props.disabled))
   assert.ok(!nodes(tree).some(node => String(node.props?.children).includes('Recuperar última')))
+  runner.unmount()
+})
+
+test('disabled fiscal mode does not require a local identity on background refresh', async () => {
+  const { runner, props, window, calls } = gate('checkout', undefined, undefined, 'disabled')
+  runner.render(props); await settle()
+  assert.equal(runner.render(props), 'POS')
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  assert.equal(runner.render(props), 'POS')
+  assert.ok(!calls.includes('load') && !calls.includes('settings'))
   runner.unmount()
 })

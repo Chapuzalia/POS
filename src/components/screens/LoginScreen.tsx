@@ -106,6 +106,9 @@ export function LoginScreen({
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
+          <p className="text-xs leading-relaxed text-[var(--muted)]">
+            
+          </p>
           <label className="block">
             <span className="text-sm font-semibold text-[var(--muted)]">
               Email
@@ -174,6 +177,7 @@ export function LoginScreen({
         <nav aria-label="Información legal" className="mt-5 flex flex-wrap justify-center gap-x-4 text-sm">
           {[billingLegalDocuments.notice, billingLegalDocuments.privacy].map(doc => <a key={doc.url} className="inline-flex min-h-11 items-center text-[var(--muted)] underline" href={doc.url} target="_blank" rel="noreferrer">{doc.title}</a>)}
         </nav>
+        
       </section>
 
       {conflictAccountName ? (

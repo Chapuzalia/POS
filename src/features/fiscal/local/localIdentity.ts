@@ -34,6 +34,24 @@ export async function readFiscalIdentity(key: string): Promise<unknown | null> {
   } finally { db.close() }
 }
 
+/** Refresh public metadata only while this PWA still owns the same active identity. */
+export async function refreshFiscalIdentitySnapshot(key: string, installationId: string, snapshot: unknown): Promise<void> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('bindings', 'readwrite')
+    const done = transactionDone(tx)
+    const store = tx.objectStore('bindings')
+    const current = await request(store.get(identityScope(key))) as { snapshot: { installation: { id: string } } } | undefined
+    const pending = await request(store.get(activationScope(key)))
+    if (!current || current.snapshot.installation.id !== installationId || pending) {
+      await done
+      throw new FiscalIdentityMissingError()
+    }
+    store.put({ scope: identityScope(key), snapshot })
+    await done
+  } finally { db.close() }
+}
+
 export async function readPendingFiscalActivation(key: string): Promise<{ requestId: string; expectedInstallationId: string | null; recoverForTesting: boolean } | null> {
   const db = await openLedger()
   try {

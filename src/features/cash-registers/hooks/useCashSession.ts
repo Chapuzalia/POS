@@ -167,15 +167,17 @@ export function useCashSession(options: Options) {
   }, [options.context])
 
   const persistLedger = useCallback((value: SetStateAction<SaleRecord[]>) => {
-    const nextLedger = typeof value === 'function' ? value(ledgerRef.current) : value
+    const previous = ledgerRef.current
+    const nextLedger = typeof value === 'function' ? value(previous) : value
     setLedger(nextLedger)
-    if (options.context) saveSaleLedger(options.context, nextLedger)
+    if (options.context) saveSaleLedger(options.context, nextLedger, previous)
   }, [options.context, setLedger])
 
   const persistTickets = useCallback((value: SetStateAction<SessionTicketRecord[]>) => {
-    const nextTickets = typeof value === 'function' ? value(ticketsRef.current) : value
+    const previous = ticketsRef.current
+    const nextTickets = typeof value === 'function' ? value(previous) : value
     setTickets(nextTickets)
-    if (options.context && session) saveSessionTickets(options.context, session.id, nextTickets)
+    if (options.context && session) saveSessionTickets(options.context, session.id, nextTickets, previous)
   }, [options.context, session, setTickets])
 
   const updateTicketPrintState = useCallback((
@@ -183,9 +185,10 @@ export function useCashSession(options: Options) {
     patch: Partial<Pick<SessionTicketRecord,
       'printStatus' | 'printJobId' | 'printRequestId' | 'printedAt' | 'printErrorCode' | 'printAttempts'>>,
   ) => {
-    const next = ticketsRef.current.map((ticket) => ticket.id === saleId ? { ...ticket, ...patch } : ticket)
+    const previous = ticketsRef.current
+    const next = previous.map((ticket) => ticket.id === saleId ? { ...ticket, ...patch } : ticket)
     setTickets(next)
-    if (options.context && session) saveSessionTickets(options.context, session.id, next)
+    if (options.context && session) saveSessionTickets(options.context, session.id, next, previous)
   }, [options.context, session, setTickets])
 
   const mergeRemotePrintStates = useCallback(
@@ -202,7 +205,7 @@ export function useCashSession(options: Options) {
     // Copies use the original persisted snapshot, including retired installations.
     if (!printOptions.isReprint && printState.token && printState.selectedPrinterId && (payload.localFiscal
       || (printOptions.fiscalMode !== 'legacy' && await resolveLocalFiscalMode(options.context.tenantId) === 'production'))) {
-      const installation = await loadFiscalInstallation(options.context, { cashRegisterId: payload.ticket.cashRegisterId })
+      const installation = await loadFiscalInstallation(options.context, { cashRegisterId: payload.ticket.cashRegisterId }, false, { localOnly: true })
       const entry = await findLocalFiscalEntryByTicket(installation, payload.ticket.id)
       if (!entry) {
         if (!printOptions.isReprint || !payload.fiscal || payload.localFiscal) {

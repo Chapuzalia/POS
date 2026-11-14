@@ -66,12 +66,12 @@ export const requestSchema = z.discriminatedUnion('action', [
   // The IBAN is forwarded to Mollie to create the SEPA mandate; it is never stored or logged.
   z.object({ action: z.literal('confirm'), tenantId: z.uuid(), operationId: z.uuid(),
     legal: z.object({ version: z.string().max(40), terms: z.boolean(), dpa: z.boolean(), businessRepresentative: z.boolean() }).strict().optional(),
-    sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict().optional(),
+    sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42), authorization: z.object({ version: z.string().max(40), accepted: z.boolean() }).strict().optional() }).strict().optional(),
     // Older installed clients may still send only name and NIF.
     payer: billingProfileSchema.partial({ email: true, address: true }).optional(),
     acceptLosses: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('change-mandate'), tenantId: z.uuid(), requestId: z.uuid(),
-    sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict() }).strict(),
+    sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42), authorization: z.object({ version: z.string().max(40), accepted: z.boolean() }).strict().optional() }).strict() }).strict(),
   z.object({ action: z.literal('retry-operation'), tenantId: z.uuid(), operationId: z.uuid() }).strict(),
   z.object({ action: z.literal('quote'), tenantId: z.uuid(), selection: selectionSchema, exception: exceptionSchema.nullable(), reason: z.string().trim().min(1).max(500),
     // Optional for N-1 clients: venues/devices to switch off at renewal or back on.

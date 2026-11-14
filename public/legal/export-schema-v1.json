@@ -1,0 +1,6046 @@
+{
+  "format": "tickit-tenant-export",
+  "schemaVersion": 1,
+  "collections": [
+    {
+      "name": "tenants",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "slug",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "venues",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "address",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "legal_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "tables_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "default_tax_rate",
+          "type": "numeric(5,2)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "manual_discount_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "manual_discount_requires_pin",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "timezone",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "day_change_time",
+          "type": "time without time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "currency_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "catalog_profile",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "production_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "tickit_assist_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "tickit_assist_sensitivity",
+          "type": "text",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "profiles",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "full_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "tenant_memberships",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "role",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "manager_venue_assignments",
+      "columns": [
+        {
+          "name": "manager_user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "device_user_assignments",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "devices",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "device_mode",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "default_cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "can_take_orders",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "can_take_payments",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "can_open_cash_session",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "can_close_cash_session",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "can_manage_cash",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "production_destination_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "cash_registers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "categories",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "icon",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "unused",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "catalog_sale_formats",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_consumption_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "inventory_consumption_unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "catalog_tabs",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "key",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "label",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "icon",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "catalog_tab_categories",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "tab_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "category_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "catalog_placements",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "tab_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "category_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "is_featured",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "catalog_audit_log",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "table_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "row_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "action",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "actor_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "before_data",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "after_data",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "products",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_rate",
+          "type": "numeric(5,2)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "product_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "product_variants",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "price_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "sku",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_default",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "catalog_sale_format_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "product_images",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "mime_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "size_bytes",
+          "type": "bigint",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "sha256",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "selection_groups",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "selection_group_options",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "supplement_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "default_quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "max_quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "product_selection_group_assignments",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "display_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "min_selection",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "max_selection",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "applies_to_all_variants",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "product_selection_group_assignment_variants",
+      "columns": [
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "assignment_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "modifier_groups",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "modifiers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_default",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "supplement_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "product_modifier_group_assignments",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "display_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "min_selection",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "max_selection",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "applies_to_all_variants",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "product_modifier_group_assignment_variants",
+      "columns": [
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "assignment_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "discounts",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "value",
+          "type": "numeric(12,2)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "color",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "rounding_increment_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "rule_kind",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "scope",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "requires_pin",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "active_weekdays",
+          "type": "smallint[]",
+          "encoding": "json"
+        },
+        {
+          "name": "starts_at",
+          "type": "time without time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "ends_at",
+          "type": "time without time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "auto_apply",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "fixed_application",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "discount_targets",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "customers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "legal_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "address",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "postal_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "city",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "province",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "country",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "phone",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "cash_sessions",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "opened_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "closed_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "opening_float_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "expected_cash_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "expected_card_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "expected_invitation_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "expected_other_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "counted_cash_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "counted_card_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "counted_invitation_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "counted_other_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discrepancy_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "opened_by_device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "closed_by_device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "final_cash_fund_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "print_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "cash_movements",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "direction",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "category",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "cash_session_stacker_collections",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "cash_closing_count_edits",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "cash_closing_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "actor_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "previous_counted_cash_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "previous_counted_card_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "counted_cash_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "counted_card_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "imported_cash_closings",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "business_date",
+          "type": "date",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "card_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_tip_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "card_tip_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "source_row_count",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "file_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "imported_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "imported_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "tickets",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "subtotal_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "total_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "local_created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_number",
+          "type": "bigint",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "discount_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_value_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_value",
+          "type": "numeric(12,2)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "discount_amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "equal_split_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "equal_split_part_number",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_rounding_increment_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_rule_kind",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_scope",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_automatic",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "is_invoice",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "customer_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "customer_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "invoice_series",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "invoice_number",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "invoice_issued_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "ticket_lines",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "unit_price_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "line_total_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "modifiers",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_rate",
+          "type": "numeric(5,2)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "taxable_base_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "allocated_quantity",
+          "type": "numeric(18,9)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "sale_format_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sale_format_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "category_id_snapshot",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "category_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "catalog_tab_id_snapshot",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "catalog_tab_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "base_price_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "component_delta_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "modifier_delta_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "gross_before_discount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "net_total_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "source_order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "theoretical_cost_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "theoretical_cost_known",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "ticket_line_components",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "component_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "selection_group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "selection_group_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "price_delta_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "sales",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "total_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "payment_method",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "local_created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "sale_payments",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sale_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "method",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "received_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "change_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "equal_split_part_number",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "refund_requests",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "original_ticket_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "original_sale_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "original_cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "refund_cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "refund_method",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "total_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_series",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_rectificative_record",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "actor_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "refund_lines",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "refund_request_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "original_ticket_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "unit_price_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "gross_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "net_total_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "product_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "modifiers",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_rate",
+          "type": "numeric(5,2)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "taxable_base_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "refund_payments",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "refund_request_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "method",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "payment_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "dining_areas",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "canvas_width",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "canvas_height",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "map_elements",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "restaurant_tables",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "area_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "capacity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "shape",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "position_x",
+          "type": "numeric(8,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "position_y",
+          "type": "numeric(8,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "width",
+          "type": "numeric(8,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "height",
+          "type": "numeric(8,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "reserved_until",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "reservation_note",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "venue_table_layouts",
+      "columns": [
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "tables",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "cash_session_table_layouts",
+      "columns": [
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "tables",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "reservations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "customer_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "customer_phone",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "customer_email",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "party_size",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "starts_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "ends_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "cancellation_reason",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "order_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "arrived_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "seated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "completed_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "cancelled_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "reservation_tables",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "reservation_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "table_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "table_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "assigned_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "order_groups",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "order_events",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "event_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "payload",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "orders",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "opened_by_user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "opened_by_device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "guest_count",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "split_sequence",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "draft_discount",
+          "type": "jsonb",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "order_tables",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "table_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "table_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "released_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "order_group_id",
+          "type": "uuid",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "order_lines",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "unit_price_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "modifiers",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "note",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "served_quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "fully_served_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "mixer_product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "mixer",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "split_from_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "components",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "catalog_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "order_line_components",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "component_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "selection_group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_name_snapshot",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "price_delta_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "restaurant_order_equal_splits",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "total_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "part_count",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "paid_parts",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "paid_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "allow_pending_service",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "default_discount",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "single_ticket",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "settlement_cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "restaurant_order_equal_split_payments",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "split_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "part_number",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "payment_method",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "received_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "change_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sale_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "subtotal_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "restaurant_equal_split_tenders",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "split_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "part_number",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "subtotal_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount_amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "discount",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "amount_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "method",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "received_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "change_cents",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "custom_payments",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "restaurant_order_carryovers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_group_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_ids",
+          "type": "uuid[]",
+          "encoding": "json"
+        },
+        {
+          "name": "from_cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "to_cash_session_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "carried_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "carried_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "carried_by_device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "recovered_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "recovered_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "recovered_by_device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "table_layout",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "parked_table_ids",
+          "type": "uuid[]",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_destinations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "kds_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "printer_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_print_agents",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "instance_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_agent_printers",
+      "columns": [
+        {
+          "name": "agent_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "printer_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "display_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "paper_width",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "character_set",
+          "type": "text",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "tickit_assist_situations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "entity_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "severity",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "started_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "ended_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "metrics",
+          "type": "jsonb",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "tickit_assist_feedback",
+      "columns": [
+        {
+          "name": "situation_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "feedback",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_category_routes",
+      "columns": [
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "category_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "destination_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_product_routes",
+      "columns": [
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "destination_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_passes",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_category_pass_routes",
+      "columns": [
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "category_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_product_pass_routes",
+      "columns": [
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_batches",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sequence",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "actor_user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "actor_device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_events",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "batch_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "production_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "destination_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "event_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "payload",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "actor_user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "actor_device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "acknowledged_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_items",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "batch_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "destination_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_order_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_component_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "units_per_commercial_unit",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "ready_quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "cancelled_quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "accepted_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_line_allocations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "batch_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "current_order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "ready_quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "cancelled_quantity",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "production_component_allocations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "batch_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "current_order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_component_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "ready_quantity",
+          "type": "numeric(18,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "cancelled_quantity",
+          "type": "numeric(18,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "order_line_production_passes",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "order_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "component_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "pass_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "skipped_quantity",
+          "type": "numeric(18,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "served_quantity",
+          "type": "numeric(18,3)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_units",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "symbol",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "decimal_places",
+          "type": "smallint",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "content_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "content_unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_warehouses",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_items",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "base_unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "reference_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "last_purchase_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "average_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_product_settings",
+      "columns": [
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "content_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "content_unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_product_format_consumptions",
+      "columns": [
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sale_format_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_device_warehouses",
+      "columns": [
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "warehouse_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "is_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "priority",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_item_warehouse_routes",
+      "columns": [
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "warehouse_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "priority",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "is_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_stock_levels",
+      "columns": [
+        {
+          "name": "warehouse_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "is_enabled",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "target_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_stock_movements",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "warehouse_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "product_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sale_format_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "stock_quantity_delta",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "stock_quantity_before",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "stock_quantity_after",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "format_consumption_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "sold_quantity",
+          "type": "numeric(18, 9)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "content_unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "production_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_recipes",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "variant_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "mode",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_recipe_lines",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "recipe_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "uses_format_default",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "modifier_inventory_effects",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "modifier_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "operation",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_production_recipes",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "production_warehouse_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "reference_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "reference_unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_production_recipe_lines",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "recipe_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sort_order",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_productions",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "warehouse_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "unit_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "stock_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "recipe_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "recipe_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "inventory_reference_cost_history",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "supplier_document_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "supplier_document_line_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "previous_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "new_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "changed_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "suppliers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "tax_id",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "legal_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "phone",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "address",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "supplier_documents",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "supplier_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "document_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "document_number",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "document_date",
+          "type": "date",
+          "encoding": "json"
+        },
+        {
+          "name": "original_file_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "original_mime_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "file_hash",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "ocr_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "confirmed_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "confirmed_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "affects_stock",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "stock_applied_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "processing_mode",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "storage_deleted_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "supplier_document_lines",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "supplier_document_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "line_number",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "supplier_reference",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "description_raw",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "description_normalized",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "barcode",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "purchase_unit",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "package_count",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "package_unit_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "package_unit_symbol",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "unit_price",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "discount_amount",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "charges_amount",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "gross_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "net_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "line_total",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "tax_rate",
+          "type": "numeric(7, 4)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "warehouse_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "base_quantity",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "normalized_unit_cost",
+          "type": "numeric(18, 6)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "match_status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "extraction_confidence",
+          "type": "numeric(5, 4)",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "update_reference_cost",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "reference_cost_decided",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "was_corrected",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "supplier_item_aliases",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "supplier_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "alias_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "alias_value",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "inventory_item_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "packaging_json",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "supplier_identity_aliases",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "supplier_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "identity_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "normalized_value",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "supplier_document_links",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "invoice_document_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "delivery_note_document_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "print_templates",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "definition",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "fiscal_subjects",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "legal_name",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "nif",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "fiscal_sif_installations",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_subject_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "installation_number",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "register_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "installation_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "mode",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "retired_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "installation_sequence",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "series_version",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "fiscal_local_series",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_subject_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "device_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "document_kind",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "exercise",
+          "type": "integer",
+          "encoding": "json"
+        },
+        {
+          "name": "series",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "last_number",
+          "type": "bigint",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "fiscal_local_records",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_subject_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "cash_register_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "invoice_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sale_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "record_kind",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "chain_position",
+          "type": "bigint",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "previous_hash",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "hash",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "canonical_schema",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "canonical_record",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "record_envelope",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "invoice_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "economic_snapshot",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "generated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "refund_request_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "fiscal_invoice_sequences",
+      "columns": [
+        {
+          "name": "series",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "last_value",
+          "type": "bigint",
+          "encoding": "decimal-string"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "fiscal_invoice_events",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "fiscal_invoice_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "event_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "error_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "name": "fiscal_invoices",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "venue_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "ticket_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "sale_id",
+          "type": "uuid",
+          "encoding": "json"
+        },
+        {
+          "name": "provider",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "environment",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "invoice_type",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "series",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "number",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "issue_date",
+          "type": "date",
+          "encoding": "json"
+        },
+        {
+          "name": "operation_date",
+          "type": "date",
+          "encoding": "json"
+        },
+        {
+          "name": "document_data",
+          "type": "jsonb",
+          "encoding": "json"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "pending_operation",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "external_uuid",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "external_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "qr_base64",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "verification_url",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "error_code",
+          "type": "text",
+          "encoding": "json"
+        },
+        {
+          "name": "issued_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "sent_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "confirmed_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "cancelled_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "encoding": "json"
+        }
+      ]
+    }
+  ]
+}

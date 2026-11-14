@@ -81,9 +81,18 @@ async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstall
     'id,tenant_id,fiscal_subject_id,installation_id,ticket_id,sale_id,refund_request_id,record_kind,chain_position,hash,record_envelope,invoice_snapshot,economic_snapshot,rpc_result',
   ).eq('tenant_id', installation.tenantId).eq('fiscal_subject_id', installation.fiscalSubjectId)
     .eq('installation_id', installation.installationId)
-  const latest = preparedHead ? { data: preparedHead.record, error: null }
-    : await readFiscalBackend(signal => scopeQuery().order('chain_position', { ascending: false })
-    .limit(1).abortSignal(signal).maybeSingle(), RECOVERY_READ_TIMEOUT_MS)
+  let latest = preparedHead ? { data: preparedHead.record, error: null }
+    : await readFiscalBackend<unknown>(signal => client.rpc('pos_fiscal_chain_head', {
+      p_tenant_id: installation.tenantId,
+      p_fiscal_subject_id: installation.fiscalSubjectId,
+      p_installation_id: installation.installationId,
+    }).abortSignal(signal).maybeSingle(), RECOVERY_READ_TIMEOUT_MS)
+  // Older databases still support the original read; authorization and transport
+  // failures must never turn into a second request through a different path.
+  if (latest.error && ['PGRST202', '42883'].includes(latest.error.code)) {
+    latest = await readFiscalBackend(signal => scopeQuery().order('chain_position', { ascending: false })
+      .limit(1).abortSignal(signal).maybeSingle(), RECOVERY_READ_TIMEOUT_MS)
+  }
   if (latest.error) throw latest.error
   if (!latest.data) return 0
   const lastServer = rowSchema.parse(latest.data)

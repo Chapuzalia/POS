@@ -45,6 +45,7 @@ export type BillingOperation = {
   created_at: string; effective_at?: string | null
 }
 export type BillingDetail = {
+  sepaRecords?: import('../../../supabase/functions/_shared/billing/sepa').SepaRecord[]
   legalAcceptances?: import('../../../supabase/functions/_shared/billing/legal').BillingLegalReceipt[]
   account: BillingAccount
   scheduledContract: Contract | null

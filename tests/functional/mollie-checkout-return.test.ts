@@ -1,3 +1,4 @@
+import { sepaAuthorizationVersion } from '../../supabase/functions/_shared/billing/sepa'
 import { readFileSync } from 'node:fs'
 import { expect, it, vi, onTestFinished } from 'vitest'
 import { createCompiledHookRunner, jsxRuntime, nodes } from '../helpers/component-harness.mjs'
@@ -132,7 +133,7 @@ it('allows a fresh quote and navigates to Mollie after the rejected attempt is r
   await fixture.fillSepa()
   const confirm = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Aceptar y pagar')
   confirm?.props.onClick()
-  await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirm', sepa: { accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332' }, payer: { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' } } })))
+  await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirm', sepa: { accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332', authorization: { version: sepaAuthorizationVersion, accepted: true } }, payer: { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' } } })))
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'legal-receipt' && node.props.acceptance.operation_id === 'new-quote')).toBe(true))
   expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(false)
   await vi.waitFor(() => expect(fixture.openBillingUrl).toHaveBeenCalledWith('https://www.mollie.com/checkout/new'))

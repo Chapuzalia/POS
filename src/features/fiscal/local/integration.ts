@@ -13,6 +13,12 @@ export type VerifactuIntegration = z.infer<typeof integrationSchema>
 const cache = new Map<string, { value: VerifactuIntegration; expiresAt: number }>()
 const key = (tenantId: string) => `tickit:verifactu-integration:v1:${tenantId}`
 
+export function readCachedVerifactuIntegration(tenantId: string): VerifactuIntegration {
+  const value = integrationSchema.parse(JSON.parse(window.localStorage.getItem(key(tenantId)) ?? 'null'))
+  if (value.tenant_id !== tenantId) throw new Error('La integración pertenece a otra empresa.')
+  return value
+}
+
 function remember(value: unknown, tenantId: string): VerifactuIntegration {
   const integration = integrationSchema.parse(value)
   if (integration.tenant_id !== tenantId) throw new Error('La integración pertenece a otra empresa.')

@@ -16,6 +16,10 @@ export function getReadableError(error: unknown, context: OperationContext = { o
     reportOperationError(error, context)
     return error.message
   }
+  if (error && typeof error === 'object' && 'message' in error && error.message === 'CATALOG_DUPLICATE_ORDER_LINE') {
+    reportOperationError(error, context)
+    return 'La comanda contiene líneas duplicadas. Revisa los productos y sus opciones antes de volver a guardar.'
+  }
   const code = errorCode(error) ?? (error instanceof Error ? error.message : '')
   if (expectedMessages[code]) return expectedMessages[code]
   reportOperationError(error, context)

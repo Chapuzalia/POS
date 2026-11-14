@@ -31,7 +31,8 @@ function load(path, modules, globals = {}) {
 const flush = () => new Promise((resolve) => setImmediate(resolve))
 const storage = () => {
   const values = new Map()
-  return { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  return { get length() { return values.size }, key: index => [...values.keys()][index] ?? null,
+    getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
 }
 const context = { userId: 'user', tenantId: 'tenant', venueId: 'venue', deviceId: 'device', role: 'cashier' }
 const cash = { id: 'existing-cash', status: 'open' }

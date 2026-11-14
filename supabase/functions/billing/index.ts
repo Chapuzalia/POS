@@ -88,7 +88,7 @@ Deno.serve(async request => {
       }
       case 'quote-cancel': return reply(await service.quoteCancel(body.tenantId, user.user.id, body.immediate, body.reason))
       case 'confirm': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, false, { sepa: body.sepa, payer: body.payer, acceptLosses: body.acceptLosses, legal: body.legal }))
-      case 'change-mandate': return reply(await service.changeMandate(body.tenantId, body.requestId, body.sepa))
+      case 'change-mandate': return reply(await service.changeMandate(body.tenantId, body.requestId, body.sepa, user.user.id))
       case 'retry-operation': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, true))
       case 'portal': return reply(await service.portal(body.tenantId))
       case 'reconcile': return reply(await service.reconcile(body.tenantId))

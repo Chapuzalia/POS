@@ -1,10 +1,13 @@
 import { BookOpen, Download, FileText, type LucideIcon } from 'lucide-react'
 import { Button } from '../../../../components/ui/Button'
+import type { TenantContext } from '../../../../types'
 import { legalDocuments, userManuals, type DocumentationEntry } from '../documentationCatalog'
+import { TenantDataExport } from '../TenantDataExport'
 
 type Props = {
   canStartOnboarding: boolean
   onStartOnboarding: () => void
+  tenantContext: TenantContext
 }
 
 const card = 'grid gap-4 rounded-2xl bg-[var(--crm-surface)] p-6 shadow-[var(--crm-shadow-card)] max-[700px]:p-4'
@@ -38,7 +41,7 @@ function DocumentList({ entries, icon: Icon, title, subtitle }: { entries: Docum
   )
 }
 
-export function DocumentationCrm({ canStartOnboarding, onStartOnboarding }: Props) {
+export function DocumentationCrm({ canStartOnboarding, onStartOnboarding, tenantContext }: Props) {
   return (
     <div className="grid gap-5">
       <section aria-label="Inicio guiado" className={`${card} sm:grid-cols-[auto_1fr_auto] sm:items-center`}>
@@ -51,6 +54,7 @@ export function DocumentationCrm({ canStartOnboarding, onStartOnboarding }: Prop
           <BookOpen aria-hidden="true" className="size-4" />Abrir inicio guiado
         </Button>
       </section>
+      {tenantContext.role === 'owner' ? <TenantDataExport key={tenantContext.tenantId} tenantId={tenantContext.tenantId} /> : null}
       <DocumentList entries={legalDocuments} icon={FileText} subtitle="Contratos y condiciones entre tu empresa y Alteil Solutions SL." title="Documentación legal" />
       <DocumentList entries={userManuals} icon={BookOpen} subtitle="Guías de uso descargables de Tickit." title="Manuales" />
     </div>

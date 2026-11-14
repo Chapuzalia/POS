@@ -1,11 +1,11 @@
-export const billingLegalVersion = '2026-11-12.1'
+export const billingLegalVersion = '2026-11-13.4'
 
 // Keep previous editions at their versioned URLs when publishing new documents.
 export const billingLegalDocuments = {
-  terms: { title: 'Términos y Condiciones', version: '1.2-mollie.1', url: '/legal/2026-11-12/condiciones-saas.html', sha256: '687a0a8ad11293de4b1f80ab040f2118bf864e2b28970f5d5162276ce9100908' },
-  dpa: { title: 'Contrato de encargo del tratamiento (DPA)', version: '1.3.1-mollie.1', url: '/legal/2026-11-12/dpa.html', sha256: '93fc411e98d6b71c8408c7c528304c90f8ffe6aa4dc80dc36f6eba6719675edb' },
-  privacy: { title: 'Información de privacidad (art. 13 RGPD)', version: '1.3-mollie.1', url: '/legal/2026-11-12/privacidad.html', sha256: '74c567ab4c3349a3dd8f00931ef1fb743cb2ecd49f2a22e035529c68c86ed573' },
-  notice: { title: 'Aviso legal', version: '1.2.1-integracion.1', url: '/legal/2026-11-12/aviso-legal.html', sha256: '825a701eea2933aaf93064b1a57cea86509500719f95450968ac749a8a8f6ff8' },
+  terms: { title: 'Términos y Condiciones', version: '1.4-saas.1', url: '/legal/2026-11-13-saas/condiciones-saas.html', sha256: '0505917093feae6deecd63a273dc9467578fba0112e480433c38c85a4704772c' },
+  dpa: { title: 'Contrato de encargo del tratamiento (DPA)', version: '1.4-rgpd.1', url: '/legal/2026-11-13-rgpd/dpa.html', sha256: '32ff1a49508e2117242ae2ee3445b4f46b0d8d2724aeb351d2a0d4d0230fa643' },
+  privacy: { title: 'Información de privacidad', version: '1.4-rgpd.2', url: '/legal/2026-11-13-saas/privacidad.html', sha256: 'cc5a8986f795b32619176301dfd9ad011eb9973cea6bb7a20b422bf3fc51b2ee' },
+  notice: { title: 'Aviso legal', version: '1.3-lssi.1', url: '/legal/2026-11-13-saas/aviso-legal.html', sha256: '0437daa91af7cfab5dbbfc0380c1f0142fae0d2de5274b0f5478c1f247908e2b' },
 } as const
 
 export type BillingLegalInput = { version: string; terms: boolean; dpa: boolean; businessRepresentative: boolean }
@@ -17,6 +17,7 @@ export type BillingLegalReceipt = {
     version: string; documents: typeof billingLegalDocuments
     declarations: { terms: true; dpa: true; businessRepresentative: true }
     payer: { legalName: string; taxId: string; email?: string }
+    sepa?: import('./sepa.ts').SepaEvidence
     contract: import('./domain.ts').Contract
     offer: { amountDueCents: number; recurringNetCents: number; recurringGrossCents: number; vatBasisPoints: number; currency: string; interval: 'month' | 'year'; automaticRenewal: true; firstPayment: 'card'; renewals: 'sepa' }
   }
